@@ -1,19 +1,17 @@
 @echo off
 chcp 65001 >nul
-title Point Lanches - Publicador de Versão (GitHub Releases)
+title Point Lanches - Publicador de Versao (GitHub Releases)
 color 0B
 
 echo ================================================================
-echo      POINT LANCHES – PUBLICADOR DE RELEASES NO GITHUB
+echo      POINT LANCHES - PUBLICADOR DE RELEASES NO GITHUB
 echo ================================================================
 echo.
 
-:: 1. Forçar UTF-8 para evitar problemas de acentuação no terminal
 set PYTHONIOENCODING=utf-8
 set PYTHONUTF8=1
 set "PATH=%~dp0tools\mingit\cmd;%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;C:\Program Files\GitHub CLI;%PATH%"
 
-:: 2. Localizar Python
 set PYTHON_CMD=python
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -24,7 +22,6 @@ if %errorlevel% neq 0 (
     )
 )
 
-:: 3. Executar publicador
 %PYTHON_CMD% tools\publish_release.py %*
 
 if %errorlevel% neq 0 (
