@@ -1,0 +1,1026 @@
+# ui/screen_admin.py - Painel Administrativo com 4 Abas (Cardápio, Adicionais, Taxas, Impressora Rede/USB)
+# =============================================================================
+
+import customtkinter as ctk
+from database.db import (
+    listar_categorias, listar_produtos,
+    adicionar_produto, atualizar_produto,
+    remover_produto, adicionar_categoria,
+    listar_adicionais, adicionar_adicional, atualizar_adicional,
+    listar_taxas, adicionar_taxa, atualizar_taxa, remover_taxa,
+    get_config, set_config,
+    listar_observacoes_padrao, adicionar_observacao_padrao,
+    atualizar_observacao_padrao, remover_observacao_padrao,
+    exportar_dados_json, importar_dados_json
+)
+from printer.escpos_printer import (
+    test_connection_network, test_connection_usb,
+    send_to_usb_printer, listar_impressoras_windows,
+    CMD_INIT, CMD_CUT, CMD_FEED_LINE, _encode,
+    CMD_CODEPAGE_CP850
+)
+from version import __version__
+from services.updater import check_for_updates
+from config import (
+    COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
+    COR_VERMELHO, COR_VERMELHO_HVR, COR_CINZA_BARRA,
+    COR_TEXTO_SUAVE, COR_AZUL_POINT,
+    PRINTER_TIPO_DEFAULT, PRINTER_IP_DEFAULT, PRINTER_USB_DEFAULT
+)
+
+
+class ScreenAdmin(ctk.CTkToplevel):
+    """
+    Janela Administrativa (Toplevel) com:
+    - Aba 1: CRUD de Produtos do Cardápio
+    - Aba 2: Gestão de Adicionais / Extras (criar, editar, ativar/desativar)
+    - Aba 3: Gestão de Botões de Taxa de Tele-Entrega
+    - Aba 4: Gestão de Observações Rápidas
+    - Aba 5: Configuração da Impressora Elgin i8 (Rede TCP 9100 e Cabo USB)
+    """
+
+    def __init__(self, parent, on_refresh=None, initial_tab=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.title("⚙  Configurações & Painel Administrativo")
+        self._on_refresh = on_refresh
+
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+
+        # Adaptado para 1366x768 (altura máxima ~570px com margem para a barra de tarefas)
+        mw = min(1040, sw - 30)
+        mh = min(570, sh - 90)
+        self.geometry(f"{mw}x{mh}")
+        self.minsize(860, 480)
+        self.grab_set()
+        self.resizable(True, True)
+
+        ctk.set_appearance_mode("Dark")
+
+        # Centralizar na tela
+        px = max(10, (sw - mw) // 2)
+        py = max(10, (sh - mh) // 2)
+        self.geometry(f"+{px}+{py}")
+
+        self._produto_selecionado = None
+        self._adicional_selecionado = None
+        self._taxa_selecionada = None
+        self._obs_selecionada = None
+
+        self._build_ui()
+        if initial_tab:
+            try:
+                self._tabs.set(initial_tab)
+            except Exception:
+                pass
+
+    # ── Build Abas ────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        # Header superior compacto com título e botões de Exportar / Importar Backup
+        header_top = ctk.CTkFrame(self, height=44, fg_color="#181818", corner_radius=0)
+        header_top.pack(fill="x")
+        header_top.pack_propagate(False)
+
+        ctk.CTkLabel(
+            header_top,
+            text=f"⚙  PAINEL ADMINISTRATIVO & CONFIGURAÇÕES (v{__version__})",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=COR_PRIMARIA
+        ).pack(side="left", padx=16)
+
+        ctk.CTkButton(
+            header_top,
+            text="🚀  Buscar Atualizações",
+            width=160, height=30,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#1E293B", hover_color="#334155",
+            corner_radius=6,
+            command=self._verificar_atualizacoes_manual
+        ).pack(side="right", padx=(4, 16))
+
+        ctk.CTkButton(
+            header_top,
+            text="📂  Importar Backup",
+            width=140, height=30,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#334155", hover_color="#475569",
+            corner_radius=6,
+            command=self._importar_backup_json
+        ).pack(side="right", padx=4)
+
+        ctk.CTkButton(
+            header_top,
+            text="💾  Exportar Backup",
+            width=140, height=30,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HVR,
+            corner_radius=6,
+            command=self._exportar_backup_json
+        ).pack(side="right", padx=4)
+
+        self._tabs = ctk.CTkTabview(self, corner_radius=10)
+        self._tabs.pack(fill="both", expand=True, padx=14, pady=(8, 14))
+
+        self._tabs.add("🍔  Cardápio")
+        self._tabs.add("🧀  Adicionais")
+        self._tabs.add("🛵  Taxas de Tele")
+        self._tabs.add("📝  Obs. Rápidas")
+        self._tabs.add("🖨  Impressora")
+
+        self._build_tab_cardapio(self._tabs.tab("🍔  Cardápio"))
+        self._build_tab_adicionais(self._tabs.tab("🧀  Adicionais"))
+        self._build_tab_taxas(self._tabs.tab("🛵  Taxas de Tele"))
+        self._build_tab_observacoes(self._tabs.tab("📝  Obs. Rápidas"))
+        self._build_tab_impressora(self._tabs.tab("🖨  Impressora"))
+
+    # ── ABA 1: CARDÁPIO ───────────────────────────────────────────────────────
+
+    def _build_tab_cardapio(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=0)
+        tab.rowconfigure(0, weight=1)
+
+        tabela_frame = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        tabela_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        tabela_frame.rowconfigure(1, weight=1)
+        tabela_frame.columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=2)
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(2, weight=1)
+        header.columnconfigure(3, weight=1)
+
+        for col, txt in enumerate(["Nome", "Categoria", "Preço", "Ação"]):
+            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+
+        self._tabela_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
+        self._tabela_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self._tabela_scroll.columnconfigure(0, weight=2)
+        self._tabela_scroll.columnconfigure(1, weight=1)
+        self._tabela_scroll.columnconfigure(2, weight=1)
+        self._tabela_scroll.columnconfigure(3, weight=1)
+
+        # Form lateral
+        form = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
+        form.grid(row=0, column=1, sticky="nsew")
+        form.pack_propagate(False)
+
+        ctk.CTkLabel(form, text="NOVO / EDITAR PRODUTO", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+
+        ctk.CTkLabel(form, text="Nome", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._f_nome = ctk.CTkEntry(form, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Xis Salada")
+        self._f_nome.pack(fill="x", padx=14, pady=(2, 6))
+
+        ctk.CTkLabel(form, text="Descrição / Ingredientes", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._f_desc = ctk.CTkTextbox(form, height=60, font=ctk.CTkFont(size=12))
+        self._f_desc.pack(fill="x", padx=14, pady=(2, 6))
+
+        ctk.CTkLabel(form, text="Preço (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._f_preco = ctk.CTkEntry(form, height=36, font=ctk.CTkFont(size=13), placeholder_text="0.00", justify="right")
+        self._f_preco.pack(fill="x", padx=14, pady=(2, 6))
+
+        ctk.CTkLabel(form, text="Categoria", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        cats = [c["nome"] for c in listar_categorias()]
+        self._f_cat_var = ctk.StringVar(value=cats[0] if cats else "")
+        self._f_cat = ctk.CTkComboBox(form, values=cats, variable=self._f_cat_var, height=36, font=ctk.CTkFont(size=13))
+        self._f_cat.pack(fill="x", padx=14, pady=(2, 6))
+
+        ctk.CTkLabel(form, text="Nova categoria (opcional)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._f_nova_cat = ctk.CTkEntry(form, height=34, font=ctk.CTkFont(size=12), placeholder_text="Ex: Sobremesas")
+        self._f_nova_cat.pack(fill="x", padx=14, pady=(2, 10))
+
+        ctk.CTkButton(form, text="💾  Salvar Produto", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_produto).pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkButton(form, text="➕  Limpar / Novo", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_form).pack(fill="x", padx=14, pady=(0, 6))
+
+        self._status_lbl = ctk.CTkLabel(form, text="", font=ctk.CTkFont(size=12), wraplength=280)
+        self._status_lbl.pack(padx=14)
+
+        self._carregar_produtos()
+
+    def _carregar_produtos(self):
+        for w in self._tabela_scroll.winfo_children():
+            w.destroy()
+
+        produtos = listar_produtos()
+        for i, prod in enumerate(produtos):
+            bg = "#272727" if i % 2 == 0 else "#222222"
+            row = ctk.CTkFrame(self._tabela_scroll, fg_color=bg, corner_radius=6, height=38)
+            row.pack(fill="x", pady=2, padx=2)
+            row.columnconfigure(0, weight=2)
+            row.columnconfigure(1, weight=1)
+            row.columnconfigure(2, weight=1)
+            row.columnconfigure(3, weight=1)
+
+            ctk.CTkLabel(row, text=prod["nome"], font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
+            ctk.CTkLabel(row, text=prod["categoria"], font=ctk.CTkFont(size=12), anchor="w", text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=8, sticky="w")
+            ctk.CTkLabel(row, text=f"R$ {prod['preco']:.2f}".replace(".", ","), font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
+            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda p=prod: self._editar_produto(p)).pack(side="left", padx=2)
+            ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda p=prod: self._confirmar_remocao(p)).pack(side="left", padx=2)
+
+    def _editar_produto(self, prod: dict):
+        self._produto_selecionado = prod
+        self._f_nome.delete(0, "end")
+        self._f_nome.insert(0, prod["nome"])
+        self._f_desc.delete("1.0", "end")
+        self._f_desc.insert("1.0", prod.get("descricao", ""))
+        self._f_preco.delete(0, "end")
+        self._f_preco.insert(0, str(prod["preco"]))
+        self._f_cat_var.set(prod.get("categoria", ""))
+        self._status_lbl.configure(text=f"Editando: {prod['nome']}", text_color=COR_AZUL_POINT)
+
+    def _salvar_produto(self):
+        nome = self._f_nome.get().strip()
+        desc = self._f_desc.get("1.0", "end").strip()
+        preco_str = self._f_preco.get().strip().replace(",", ".")
+        nova_cat = self._f_nova_cat.get().strip()
+
+        if not nome:
+            self._status_lbl.configure(text="⚠ Nome é obrigatório!", text_color=COR_VERMELHO)
+            return
+        try:
+            preco = float(preco_str)
+        except ValueError:
+            self._status_lbl.configure(text="⚠ Preço inválido!", text_color=COR_VERMELHO)
+            return
+
+        if nova_cat:
+            adicionar_categoria(nova_cat)
+            cat_nome = nova_cat
+        else:
+            cat_nome = self._f_cat_var.get()
+
+        cats = {c["nome"]: c["id"] for c in listar_categorias()}
+        cat_id = cats.get(cat_nome)
+        if not cat_id:
+            self._status_lbl.configure(text="⚠ Categoria inválida!", text_color=COR_VERMELHO)
+            return
+
+        if self._produto_selecionado:
+            atualizar_produto(self._produto_selecionado["id"], nome, desc, preco, cat_id)
+            self._status_lbl.configure(text=f"✅ '{nome}' atualizado!", text_color=COR_VERDE)
+        else:
+            adicionar_produto(cat_id, nome, desc, preco)
+            self._status_lbl.configure(text=f"✅ '{nome}' adicionado!", text_color=COR_VERDE)
+
+        self._limpar_form()
+        self._carregar_produtos()
+        self._f_cat.configure(values=[c["nome"] for c in listar_categorias()])
+
+    def _confirmar_remocao(self, prod: dict):
+        remover_produto(prod["id"])
+        self._carregar_produtos()
+
+    def _limpar_form(self):
+        self._produto_selecionado = None
+        self._f_nome.delete(0, "end")
+        self._f_desc.delete("1.0", "end")
+        self._f_preco.delete(0, "end")
+        self._f_nova_cat.delete(0, "end")
+        self._status_lbl.configure(text="")
+
+    # ── ABA 2: ADICIONAIS / EXTRAS ───────────────────────────────────────────
+
+    def _build_tab_adicionais(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=0)
+        tab.rowconfigure(0, weight=1)
+
+        tabela_frame = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        tabela_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        tabela_frame.rowconfigure(1, weight=1)
+        tabela_frame.columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=2)
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(2, weight=1)
+        header.columnconfigure(3, weight=1)
+
+        for col, txt in enumerate(["Adicional / Extra", "Acréscimo (R$)", "Status", "Ações"]):
+            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+
+        self._adicionais_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
+        self._adicionais_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+
+        # Form lateral adicionais
+        form_ad = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
+        form_ad.grid(row=0, column=1, sticky="nsew")
+        form_ad.pack_propagate(False)
+
+        ctk.CTkLabel(form_ad, text="GERENCIAR ADICIONAL", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+
+        ctk.CTkLabel(form_ad, text="Nome do Adicional", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._ad_nome = ctk.CTkEntry(form_ad, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Bacon, Queijo Extra...")
+        self._ad_nome.pack(fill="x", padx=14, pady=(2, 8))
+
+        ctk.CTkLabel(form_ad, text="Preço / Acréscimo (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._ad_preco = ctk.CTkEntry(form_ad, height=36, font=ctk.CTkFont(size=13), placeholder_text="3.00", justify="right")
+        self._ad_preco.pack(fill="x", padx=14, pady=(2, 8))
+
+        self._ad_ativo_var = ctk.BooleanVar(value=True)
+        self._ad_switch = ctk.CTkSwitch(form_ad, text="Ativo no cardápio", variable=self._ad_ativo_var)
+        self._ad_switch.pack(anchor="w", padx=14, pady=(4, 14))
+
+        ctk.CTkButton(form_ad, text="💾  Salvar Adicional", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_adicional).pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkButton(form_ad, text="➕  Novo / Limpar", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_adicional).pack(fill="x", padx=14, pady=(0, 6))
+
+        self._ad_status_lbl = ctk.CTkLabel(form_ad, text="", font=ctk.CTkFont(size=12), wraplength=280)
+        self._ad_status_lbl.pack(padx=14)
+
+        self._carregar_adicionais()
+
+    def _carregar_adicionais(self):
+        for w in self._adicionais_scroll.winfo_children():
+            w.destroy()
+
+        adicionais = listar_adicionais(apenas_ativos=False)
+        for i, ad in enumerate(adicionais):
+            bg = "#272727" if i % 2 == 0 else "#222222"
+            row = ctk.CTkFrame(self._adicionais_scroll, fg_color=bg, corner_radius=6, height=38)
+            row.pack(fill="x", pady=2, padx=2)
+            row.columnconfigure(0, weight=2)
+            row.columnconfigure(1, weight=1)
+            row.columnconfigure(2, weight=1)
+            row.columnconfigure(3, weight=1)
+
+            ctk.CTkLabel(row, text=ad["nome"], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
+            ctk.CTkLabel(row, text=f"+ R$ {ad['preco']:.2f}".replace(".", ","), font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+
+            status_txt = "Ativo" if ad.get("ativo", 1) else "Inativo"
+            status_cor = COR_VERDE if ad.get("ativo", 1) else COR_VERMELHO
+            ctk.CTkLabel(row, text=status_txt, font=ctk.CTkFont(size=11, weight="bold"), text_color=status_cor, anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
+
+            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda a=ad: self._editar_adicional(a)).pack(side="left", padx=2)
+
+            novo_status = 0 if ad.get("ativo", 1) else 1
+            btn_txt = "Desativar" if ad.get("ativo", 1) else "Ativar"
+            btn_cor = COR_VERMELHO if ad.get("ativo", 1) else COR_VERDE
+            ctk.CTkButton(btn_frame, text=btn_txt, width=70, height=26, font=ctk.CTkFont(size=11), fg_color=btn_cor, corner_radius=6, command=lambda a=ad, st=novo_status: self._toggle_adicional(a, st)).pack(side="left", padx=2)
+
+    def _editar_adicional(self, ad: dict):
+        self._adicional_selecionado = ad
+        self._ad_nome.delete(0, "end")
+        self._ad_nome.insert(0, ad["nome"])
+        self._ad_preco.delete(0, "end")
+        self._ad_preco.insert(0, str(ad["preco"]))
+        self._ad_ativo_var.set(bool(ad.get("ativo", 1)))
+        self._ad_status_lbl.configure(text=f"Editando: {ad['nome']}", text_color=COR_AZUL_POINT)
+
+    def _salvar_adicional(self):
+        nome = self._ad_nome.get().strip()
+        preco_str = self._ad_preco.get().strip().replace(",", ".")
+        ativo = 1 if self._ad_ativo_var.get() else 0
+
+        if not nome:
+            self._ad_status_lbl.configure(text="⚠ Nome é obrigatório!", text_color=COR_VERMELHO)
+            return
+        try:
+            preco = float(preco_str)
+        except ValueError:
+            self._ad_status_lbl.configure(text="⚠ Preço inválido!", text_color=COR_VERMELHO)
+            return
+
+        if self._adicional_selecionado:
+            atualizar_adicional(self._adicional_selecionado["id"], nome, preco, ativo)
+            self._ad_status_lbl.configure(text=f"✅ '{nome}' atualizado!", text_color=COR_VERDE)
+        else:
+            adicionar_adicional(nome, preco)
+            self._ad_status_lbl.configure(text=f"✅ '{nome}' adicionado!", text_color=COR_VERDE)
+
+        self._limpar_adicional()
+        self._carregar_adicionais()
+
+    def _toggle_adicional(self, ad: dict, novo_status: int):
+        atualizar_adicional(ad["id"], ad["nome"], ad["preco"], novo_status)
+        self._carregar_adicionais()
+
+    def _limpar_adicional(self):
+        self._adicional_selecionado = None
+        self._ad_nome.delete(0, "end")
+        self._ad_preco.delete(0, "end")
+        self._ad_ativo_var.set(True)
+        self._ad_status_lbl.configure(text="")
+
+    # ── ABA 3: TAXAS DE TELE-ENTREGA ──────────────────────────────────────────
+
+    def _build_tab_taxas(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=0)
+        tab.rowconfigure(0, weight=1)
+
+        tabela_frame = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        tabela_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        tabela_frame.rowconfigure(1, weight=1)
+        tabela_frame.columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        header.columnconfigure(1, weight=2)
+        header.columnconfigure(2, weight=1)
+        header.columnconfigure(3, weight=1)
+
+        for col, txt in enumerate(["Valor (R$)", "Texto no Botão", "Status", "Ações"]):
+            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+
+        self._taxas_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
+        self._taxas_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+
+        # Form lateral taxas
+        form_tx = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
+        form_tx.grid(row=0, column=1, sticky="nsew")
+        form_tx.pack_propagate(False)
+
+        ctk.CTkLabel(form_tx, text="CONFIGURAR BOTÃO DE TAXA", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+
+        ctk.CTkLabel(form_tx, text="Valor Numérico (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._tx_valor = ctk.CTkEntry(form_tx, height=36, font=ctk.CTkFont(size=13), placeholder_text="7.00", justify="right")
+        self._tx_valor.pack(fill="x", padx=14, pady=(2, 8))
+
+        ctk.CTkLabel(form_tx, text="Rótulo no Botão", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._tx_label = ctk.CTkEntry(form_tx, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: R$ 7 ou Grátis")
+        self._tx_label.pack(fill="x", padx=14, pady=(2, 8))
+
+        self._tx_ativo_var = ctk.BooleanVar(value=True)
+        self._tx_switch = ctk.CTkSwitch(form_tx, text="Ativo na tela de entrega", variable=self._tx_ativo_var)
+        self._tx_switch.pack(anchor="w", padx=14, pady=(4, 14))
+
+        ctk.CTkButton(form_tx, text="💾  Salvar Botão de Taxa", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_taxa).pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkButton(form_tx, text="➕  Novo / Limpar", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_taxa).pack(fill="x", padx=14, pady=(0, 6))
+
+        self._tx_status_lbl = ctk.CTkLabel(form_tx, text="", font=ctk.CTkFont(size=12), wraplength=280)
+        self._tx_status_lbl.pack(padx=14)
+
+        self._carregar_taxas()
+
+    def _carregar_taxas(self):
+        for w in self._taxas_scroll.winfo_children():
+            w.destroy()
+
+        taxas = listar_taxas(apenas_ativas=False)
+        for i, tx in enumerate(taxas):
+            bg = "#272727" if i % 2 == 0 else "#222222"
+            row = ctk.CTkFrame(self._taxas_scroll, fg_color=bg, corner_radius=6, height=38)
+            row.pack(fill="x", pady=2, padx=2)
+            row.columnconfigure(0, weight=1)
+            row.columnconfigure(1, weight=2)
+            row.columnconfigure(2, weight=1)
+            row.columnconfigure(3, weight=1)
+
+            ctk.CTkLabel(row, text=f"R$ {tx['valor']:.2f}".replace(".", ","), font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
+            ctk.CTkLabel(row, text=tx["label"], font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+
+            status_txt = "Ativo" if tx.get("ativo", 1) else "Inativo"
+            status_cor = COR_VERDE if tx.get("ativo", 1) else COR_VERMELHO
+            ctk.CTkLabel(row, text=status_txt, font=ctk.CTkFont(size=11, weight="bold"), text_color=status_cor, anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
+
+            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda t=tx: self._editar_taxa(t)).pack(side="left", padx=2)
+            ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda t=tx: self._excluir_taxa(t)).pack(side="left", padx=2)
+
+    def _editar_taxa(self, tx: dict):
+        self._taxa_selecionada = tx
+        self._tx_valor.delete(0, "end")
+        self._tx_valor.insert(0, str(tx["valor"]))
+        self._tx_label.delete(0, "end")
+        self._tx_label.insert(0, tx["label"])
+        self._tx_ativo_var.set(bool(tx.get("ativo", 1)))
+        self._tx_status_lbl.configure(text=f"Editando: {tx['label']}", text_color=COR_AZUL_POINT)
+
+    def _salvar_taxa(self):
+        val_str = self._tx_valor.get().strip().replace(",", ".")
+        label = self._tx_label.get().strip()
+        ativo = 1 if self._tx_ativo_var.get() else 0
+
+        try:
+            valor = float(val_str)
+        except ValueError:
+            self._tx_status_lbl.configure(text="⚠ Valor numérico inválido!", text_color=COR_VERMELHO)
+            return
+
+        if not label:
+            label = "Grátis" if valor == 0 else f"R$ {int(valor) if valor == int(valor) else valor}"
+
+        if self._taxa_selecionada:
+            atualizar_taxa(self._taxa_selecionada["id"], valor, label, ativo)
+            self._tx_status_lbl.configure(text=f"✅ Botão '{label}' atualizado!", text_color=COR_VERDE)
+        else:
+            adicionar_taxa(valor, label, ativo)
+            self._tx_status_lbl.configure(text=f"✅ Botão '{label}' adicionado!", text_color=COR_VERDE)
+
+        self._limpar_taxa()
+        self._carregar_taxas()
+
+    def _excluir_taxa(self, tx: dict):
+        remover_taxa(tx["id"])
+        self._carregar_taxas()
+
+    def _limpar_taxa(self):
+        self._taxa_selecionada = None
+        self._tx_valor.delete(0, "end")
+        self._tx_label.delete(0, "end")
+        self._tx_ativo_var.set(True)
+        self._tx_status_lbl.configure(text="")
+
+    # ── ABA 4: OBSERVAÇÕES RÁPIDAS ───────────────────────────────────────────
+
+    def _build_tab_observacoes(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=0)
+        tab.rowconfigure(0, weight=1)
+
+        tabela_frame = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        tabela_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        tabela_frame.rowconfigure(1, weight=1)
+        tabela_frame.columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=2)
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(2, weight=1)
+
+        for col, txt in enumerate(["Texto da Observação", "Status", "Ações"]):
+            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+
+        self._obs_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
+        self._obs_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+
+        # Form lateral observações
+        form_obs = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
+        form_obs.grid(row=0, column=1, sticky="nsew")
+        form_obs.pack_propagate(False)
+
+        ctk.CTkLabel(form_obs, text="GERENCIAR OBSERVAÇÃO", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+
+        ctk.CTkLabel(form_obs, text="Texto da Observação", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._obs_texto = ctk.CTkEntry(form_obs, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Sem Cebola, Bem Passado...")
+        self._obs_texto.pack(fill="x", padx=14, pady=(2, 8))
+
+        self._obs_ativo_var = ctk.BooleanVar(value=True)
+        self._obs_switch = ctk.CTkSwitch(form_obs, text="Ativa no pop-up de itens", variable=self._obs_ativo_var)
+        self._obs_switch.pack(anchor="w", padx=14, pady=(4, 14))
+
+        ctk.CTkButton(form_obs, text="💾  Salvar Observação", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_obs).pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkButton(form_obs, text="➕  Novo / Limpar", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_obs).pack(fill="x", padx=14, pady=(0, 6))
+
+        self._obs_status_lbl = ctk.CTkLabel(form_obs, text="", font=ctk.CTkFont(size=12), wraplength=280)
+        self._obs_status_lbl.pack(padx=14)
+
+        # Dica
+        ctk.CTkLabel(
+            form_obs,
+            text="💡 Essas observações aparecem como\n"
+                 "    botões rápidos no pop-up de\n"
+                 "    personalização de cada item.",
+            font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
+        ).pack(anchor="w", padx=14, pady=(20, 0))
+
+        self._carregar_obs()
+
+    def _carregar_obs(self):
+        for w in self._obs_scroll.winfo_children():
+            w.destroy()
+
+        obs_list = listar_observacoes_padrao(apenas_ativas=False)
+        for i, obs in enumerate(obs_list):
+            bg = "#272727" if i % 2 == 0 else "#222222"
+            row = ctk.CTkFrame(self._obs_scroll, fg_color=bg, corner_radius=6, height=38)
+            row.pack(fill="x", pady=2, padx=2)
+            row.columnconfigure(0, weight=2)
+            row.columnconfigure(1, weight=1)
+            row.columnconfigure(2, weight=1)
+
+            ctk.CTkLabel(row, text=obs["texto"], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
+
+            status_txt = "Ativa" if obs.get("ativo", 1) else "Inativa"
+            status_cor = COR_VERDE if obs.get("ativo", 1) else COR_VERMELHO
+            ctk.CTkLabel(row, text=status_txt, font=ctk.CTkFont(size=11, weight="bold"), text_color=status_cor, anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+            btn_frame.grid(row=0, column=2, padx=4, sticky="e")
+
+            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda o=obs: self._editar_obs(o)).pack(side="left", padx=2)
+
+            novo_status = 0 if obs.get("ativo", 1) else 1
+            btn_txt = "Desativar" if obs.get("ativo", 1) else "Ativar"
+            btn_cor = COR_VERMELHO if obs.get("ativo", 1) else COR_VERDE
+            ctk.CTkButton(btn_frame, text=btn_txt, width=70, height=26, font=ctk.CTkFont(size=11), fg_color=btn_cor, corner_radius=6, command=lambda o=obs, st=novo_status: self._toggle_obs(o, st)).pack(side="left", padx=2)
+
+            ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda o=obs: self._excluir_obs(o)).pack(side="left", padx=2)
+
+    def _editar_obs(self, obs: dict):
+        self._obs_selecionada = obs
+        self._obs_texto.delete(0, "end")
+        self._obs_texto.insert(0, obs["texto"])
+        self._obs_ativo_var.set(bool(obs.get("ativo", 1)))
+        self._obs_status_lbl.configure(text=f"Editando: {obs['texto']}", text_color=COR_AZUL_POINT)
+
+    def _salvar_obs(self):
+        texto = self._obs_texto.get().strip()
+        ativo = 1 if self._obs_ativo_var.get() else 0
+
+        if not texto:
+            self._obs_status_lbl.configure(text="⚠ Texto é obrigatório!", text_color=COR_VERMELHO)
+            return
+
+        if self._obs_selecionada:
+            atualizar_observacao_padrao(self._obs_selecionada["id"], texto, ativo)
+            self._obs_status_lbl.configure(text=f"✅ '{texto}' atualizado!", text_color=COR_VERDE)
+        else:
+            adicionar_observacao_padrao(texto)
+            self._obs_status_lbl.configure(text=f"✅ '{texto}' adicionado!", text_color=COR_VERDE)
+
+        self._limpar_obs()
+        self._carregar_obs()
+
+    def _toggle_obs(self, obs: dict, novo_status: int):
+        atualizar_observacao_padrao(obs["id"], obs["texto"], novo_status)
+        self._carregar_obs()
+
+    def _excluir_obs(self, obs: dict):
+        remover_observacao_padrao(obs["id"])
+        self._carregar_obs()
+
+    def _limpar_obs(self):
+        self._obs_selecionada = None
+        self._obs_texto.delete(0, "end")
+        self._obs_ativo_var.set(True)
+        self._obs_status_lbl.configure(text="")
+
+    # ── ABA 5: IMPRESSORA (REDE E CABO USB) ────────────────────────────────────
+
+    def _build_tab_impressora(self, tab):
+        scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=16, pady=8)
+
+        card = ctk.CTkFrame(scroll, fg_color=COR_CINZA_BARRA, corner_radius=12)
+        card.pack(fill="x", padx=16, pady=6)
+
+        ctk.CTkLabel(
+            card, text="🖨  Configuração da Impressora Térmica Elgin i8",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(anchor="w", padx=20, pady=(18, 4))
+
+        ctk.CTkLabel(
+            card, text="Selecione abaixo o método de conexão da Elgin i8 a este computador de caixa:",
+            font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE
+        ).pack(anchor="w", padx=20, pady=(0, 14))
+
+        # Seletor de Tipo de Conexão
+        self._tipo_conexao_var = ctk.StringVar(value=get_config("printer_tipo", PRINTER_TIPO_DEFAULT))
+
+        tipo_frame = ctk.CTkFrame(card, fg_color="#1E1E1E", corner_radius=8)
+        tipo_frame.pack(fill="x", padx=20, pady=(0, 16))
+
+        r_rede = ctk.CTkRadioButton(
+            tipo_frame, text="🌐  Rede Ethernet / Wi-Fi (TCP Socket Porta 9100)",
+            variable=self._tipo_conexao_var, value="rede",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._alternar_interface_impressora
+        )
+        r_rede.pack(side="left", padx=20, pady=12)
+
+        r_usb = ctk.CTkRadioButton(
+            tipo_frame, text="🔌  Cabo USB Direto (Windows Spooler / Driver)",
+            variable=self._tipo_conexao_var, value="usb",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._alternar_interface_impressora
+        )
+        r_usb.pack(side="left", padx=20, pady=12)
+
+        # ── Painel de Configuração REDE ──
+        self._frame_rede = ctk.CTkFrame(card, fg_color="#232323", corner_radius=8)
+        self._frame_rede.pack(fill="x", padx=20, pady=(0, 12))
+
+        ctk.CTkLabel(
+            self._frame_rede, text="Configuração de Rede (Ethernet / TCP Socket):",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_PRIMARIA
+        ).pack(anchor="w", padx=14, pady=(12, 4))
+
+        ctk.CTkLabel(
+            self._frame_rede, text="Endereço IP da Elgin i8 na rede local:",
+            font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE
+        ).pack(anchor="w", padx=14)
+
+        ip_input_row = ctk.CTkFrame(self._frame_rede, fg_color="transparent")
+        ip_input_row.pack(fill="x", padx=14, pady=(4, 12))
+
+        self._ip_var = ctk.StringVar(value=get_config("printer_ip", PRINTER_IP_DEFAULT))
+        self._ip_entry = ctk.CTkEntry(
+            ip_input_row, textvariable=self._ip_var, width=220, height=40,
+            font=ctk.CTkFont(size=15), placeholder_text="192.168.1.100"
+        )
+        self._ip_entry.pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(
+            ip_input_row, text="Porta: 9100 (Padrão RAW)",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE
+        ).pack(side="left", padx=6)
+
+        ctk.CTkButton(
+            ip_input_row, text="🔌  Testar Conexão (Socket TCP)", height=40, width=220,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#3A3A3A", hover_color="#4A4A4A",
+            command=self._testar_impressora_rede
+        ).pack(side="left", padx=(14, 0))
+
+        # ── Painel de Configuração USB ──
+        self._frame_usb = ctk.CTkFrame(card, fg_color="#232323", corner_radius=8)
+        self._frame_usb.pack(fill="x", padx=20, pady=(0, 12))
+
+        ctk.CTkLabel(
+            self._frame_usb, text="Configuração Cabo USB (Windows Spooler / Driver):",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_PRIMARIA
+        ).pack(anchor="w", padx=14, pady=(12, 4))
+
+        ctk.CTkLabel(
+            self._frame_usb, text="Selecione a impressora Elgin i8 instalada no Windows:",
+            font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE
+        ).pack(anchor="w", padx=14)
+
+        usb_input_row = ctk.CTkFrame(self._frame_usb, fg_color="transparent")
+        usb_input_row.pack(fill="x", padx=14, pady=(4, 12))
+
+        printers_list = listar_impressoras_windows()
+        if not printers_list:
+            printers_list = [PRINTER_USB_DEFAULT, "POS-80"]
+
+        default_usb = get_config("printer_usb", PRINTER_USB_DEFAULT)
+        self._usb_var = ctk.StringVar(value=default_usb)
+
+        self._usb_combo = ctk.CTkComboBox(
+            usb_input_row, variable=self._usb_var,
+            values=printers_list, width=280, height=40,
+            font=ctk.CTkFont(size=13)
+        )
+        self._usb_combo.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            usb_input_row, text="🔄  Atualizar Lista", height=40, width=130,
+            font=ctk.CTkFont(size=12),
+            fg_color="#333", hover_color="#444",
+            command=self._atualizar_lista_usb
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            usb_input_row, text="🔌  Testar Impressão USB", height=40, width=180,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#3A3A3A", hover_color="#4A4A4A",
+            command=self._testar_impressora_usb
+        ).pack(side="left")
+
+        # Botão Salvar Global de Impressora
+        save_box = ctk.CTkFrame(card, fg_color="transparent")
+        save_box.pack(fill="x", padx=20, pady=(6, 14))
+
+        ctk.CTkButton(
+            save_box, text="💾  SALVAR CONFIGURAÇÕES DA IMPRESSORA",
+            height=44, font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_VERDE, hover_color=COR_VERDE_HVR,
+            corner_radius=8,
+            command=self._salvar_config_impressora
+        ).pack(side="left", padx=(0, 14))
+
+        self._printer_status_lbl = ctk.CTkLabel(
+            save_box, text="", font=ctk.CTkFont(size=13, weight="bold")
+        )
+        self._printer_status_lbl.pack(side="left")
+
+        # Dicas informativas
+        dica_box = ctk.CTkFrame(card, fg_color="#181818", corner_radius=8)
+        dica_box.pack(fill="x", padx=20, pady=(0, 18))
+
+        ctk.CTkLabel(
+            dica_box,
+            text="💡 Dicas de Conexão:\n"
+                 "  • Cabo USB: Conecte o cabo USB no computador e instale o driver oficial da Elgin i8.\n"
+                 "    A impressora aparecerá na lista suspensa acima (ex: 'Elgin i8' ou 'POS-80').\n"
+                 "  • Rede Ethernet: Conecte o cabo de rede no roteador. Ligue a impressora segurando\n"
+                 "    o botão FEED por 3 segundos para imprimir a folha com o IP atual da rede.",
+            font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
+        ).pack(anchor="w", padx=16, pady=10)
+
+        # Atualizar visibilidade inicial
+        self._alternar_interface_impressora()
+
+    def _alternar_interface_impressora(self):
+        tipo = self._tipo_conexao_var.get()
+        if tipo == "usb":
+            self._frame_usb.configure(border_color=COR_PRIMARIA, border_width=1)
+            self._frame_rede.configure(border_width=0)
+        else:
+            self._frame_rede.configure(border_color=COR_PRIMARIA, border_width=1)
+            self._frame_usb.configure(border_width=0)
+
+    def _atualizar_lista_usb(self):
+        printers = listar_impressoras_windows()
+        if not printers:
+            printers = [PRINTER_USB_DEFAULT, "POS-80"]
+        self._usb_combo.configure(values=printers)
+        self._printer_status_lbl.configure(text=f"🔄 {len(printers)} impressoras encontradas no Windows.", text_color=COR_PRIMARIA)
+
+    def _salvar_config_impressora(self):
+        tipo = self._tipo_conexao_var.get()
+        ip = self._ip_var.get().strip()
+        usb = self._usb_var.get().strip()
+
+        set_config("printer_tipo", tipo)
+        if ip:
+            set_config("printer_ip", ip)
+        if usb:
+            set_config("printer_usb", usb)
+
+        alvo = f"USB '{usb}'" if tipo == "usb" else f"Rede '{ip}:9100'"
+        self._printer_status_lbl.configure(
+            text=f"✅ Configuração salva: Modo {tipo.upper()} -> {alvo}!",
+            text_color=COR_VERDE
+        )
+
+    def _testar_impressora_rede(self):
+        ip = self._ip_var.get().strip()
+        if not ip:
+            self._printer_status_lbl.configure(text="⚠ Informe o endereço IP da Elgin i8!", text_color=COR_VERMELHO)
+            return
+
+        self._printer_status_lbl.configure(text=f"⏳ Testando conexão Socket TCP em {ip}:9100 (timeout 2s)...", text_color=COR_AZUL_POINT)
+        self.update()
+
+        import threading
+        import socket
+        def _test():
+            try:
+                with socket.create_connection((ip, 9100), timeout=2.0):
+                    self.after(0, lambda: self._printer_status_lbl.configure(
+                        text=f"✅ Elgin i8 em {ip}:9100 conectada com sucesso!",
+                        text_color=COR_VERDE
+                    ))
+            except Exception:
+                self.after(0, lambda: self._printer_status_lbl.configure(
+                    text=f"❌ Inacessível em {ip}:9100 (verifique se a impressora está ligada e na rede)",
+                    text_color=COR_VERMELHO
+                ))
+
+        threading.Thread(target=_test, daemon=True).start()
+
+    def _testar_impressora_usb(self):
+        nome_usb = self._usb_var.get().strip()
+        if not nome_usb:
+            self._printer_status_lbl.configure(text="⚠ Selecione ou digite o nome da impressora USB!", text_color=COR_VERMELHO)
+            return
+
+        self._printer_status_lbl.configure(text="⏳ Enviando comando de teste via USB Spooler...", text_color=COR_AZUL_POINT)
+        self.update()
+
+        import threading
+        def _test():
+            try:
+                teste_bytes = (
+                    CMD_INIT +
+                    CMD_CODEPAGE_CP850 +
+                    b"\n" +
+                    _encode("================================\n") +
+                    _encode("   TESTE ELGIN i8 USB - OK!    \n") +
+                    _encode("   Acentuação: Coração & Opção \n") +
+                    _encode("   Point Lanches - Sistema     \n") +
+                    _encode("================================\n\n\n") +
+                    CMD_CUT
+                )
+                send_to_usb_printer(nome_usb, teste_bytes)
+                self.after(0, lambda: self._printer_status_lbl.configure(
+                    text=f"✅ Teste USB enviado para '{nome_usb}' com sucesso!",
+                    text_color=COR_VERDE
+                ))
+            except Exception as e:
+                self.after(0, lambda: self._printer_status_lbl.configure(
+                    text=f"❌ Falha no teste USB: {e}",
+                    text_color=COR_VERMELHO
+                ))
+
+        threading.Thread(target=_test, daemon=True).start()
+
+    def _carregar_config(self):
+        """Recarrega os valores de configuração da impressora nos campos."""
+        if hasattr(self, "_tipo_conexao_var"):
+            self._tipo_conexao_var.set(get_config("printer_tipo", PRINTER_TIPO_DEFAULT))
+            self._alternar_interface_impressora()
+        if hasattr(self, "_ip_var"):
+            self._ip_var.set(get_config("printer_ip", PRINTER_IP_DEFAULT))
+        if hasattr(self, "_usb_var"):
+            self._usb_var.set(get_config("printer_usb", PRINTER_USB_DEFAULT))
+
+    # ── BACKUP & PORTABILIDADE (EXPORTAR / IMPORTAR JSON) ─────────────────────
+
+    def _exportar_backup_json(self):
+        from tkinter import filedialog
+        from datetime import datetime
+        import json
+
+        data_s = datetime.now().strftime("%Y%m%d_%H%M%S")
+        sugestao_nome = f"point_lanches_backup_{data_s}.json"
+
+        caminho = filedialog.asksaveasfilename(
+            parent=self,
+            title="Salvar Backup de Configurações",
+            initialfile=sugestao_nome,
+            defaultextension=".json",
+            filetypes=[("Arquivo JSON", "*.json"), ("Todos os Arquivos", "*.*")]
+        )
+        if not caminho:
+            return
+
+        try:
+            dados = exportar_dados_json()
+            with open(caminho, "w", encoding="utf-8") as f:
+                json.dump(dados, f, ensure_ascii=False, indent=2)
+
+            self._mostrar_alerta("Backup Exportado!", f"Configurações exportadas com sucesso para:\n{caminho}", icone="✅")
+        except Exception as e:
+            self._mostrar_alerta("Erro na Exportação", f"Não foi possível salvar o arquivo de backup:\n{str(e)}", icone="❌")
+
+    def _importar_backup_json(self):
+        from tkinter import filedialog
+        import json
+
+        caminho = filedialog.askopenfilename(
+            parent=self,
+            title="Selecionar Arquivo de Backup para Importação",
+            filetypes=[("Arquivo JSON", "*.json"), ("Todos os Arquivos", "*.*")]
+        )
+        if not caminho:
+            return
+
+        try:
+            with open(caminho, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+
+            sucesso, msg = importar_dados_json(dados)
+            if sucesso:
+                # Recarregar abas do Admin em tempo real
+                self._carregar_produtos()
+                self._carregar_adicionais()
+                self._carregar_taxas()
+                if hasattr(self, "_carregar_obs"):
+                    self._carregar_obs()
+                self._carregar_config()
+                if hasattr(self, "_atualizar_balanco"):
+                    self._atualizar_balanco()
+
+                # Notificar app pai para atualizar cardápio e telas principais
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+                self._mostrar_alerta("Importação Concluída!", "Configurações importadas e aplicadas ao sistema em tempo real!", icone="✅")
+            else:
+                self._mostrar_alerta("Falha na Validação", msg, icone="⚠️")
+        except Exception as e:
+            self._mostrar_alerta("Arquivo Inválido", f"Erro ao processar o arquivo JSON:\n{str(e)}", icone="❌")
+
+    def _mostrar_alerta(self, titulo: str, mensagem: str, icone: str = "ℹ️"):
+        win = ctk.CTkToplevel(self)
+        win.title(titulo)
+        win.geometry("420x220")
+        win.grab_set()
+        win.resizable(False, False)
+
+        win.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width() - 420) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - 220) // 2
+        win.geometry(f"+{max(0, px)}+{max(0, py)}")
+
+        ctk.CTkLabel(win, text=icone, font=ctk.CTkFont(size=44)).pack(pady=(16, 2))
+        ctk.CTkLabel(win, text=titulo, font=ctk.CTkFont(size=15, weight="bold")).pack(pady=(2, 6))
+        ctk.CTkLabel(win, text=mensagem, font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE, wraplength=380, justify="center").pack(padx=20, pady=(0, 14))
+
+        ctk.CTkButton(
+            win, text="OK", width=120, height=36,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HVR,
+            corner_radius=8, command=win.destroy
+        ).pack(pady=(0, 14))
+
+    def _verificar_atualizacoes_manual(self):
+        """Dispara verificação de atualizações com feedback explícito."""
+        import threading
+        t = threading.Thread(
+            target=lambda: check_for_updates(self, silent_if_uptodate=False),
+            daemon=True
+        )
+        t.start()
+

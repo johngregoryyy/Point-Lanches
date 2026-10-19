@@ -1,0 +1,1246 @@
+{
+  "type": "FeatureCollection",
+  "generator": "PointLanches-GeoSanitizer",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. 10 de Setembro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. Central",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. Florestal",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. Irineu Becker",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. Porto Alegre",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. Sapiranga",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. São Miguel",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Av. das Palmeiras",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Estrada Campo Bom",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Estrada Linha Imperial",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Estrada Morro Reuter",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Estrada Picada 48",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Estrada Travessão",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Estrada da Amizade",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua 10 de Setembro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua 20 de Setembro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua 21 de Abril",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua 25 de Julho",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Acre",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Alagoas",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Alberto Rübenich",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Alberto Schmidt",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Albino Wendling",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Aloísio Herbert",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Alvorada",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Amapá",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Amazonas",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Anita Garibaldi",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Arlindo Becker",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Arthur Strassburger",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Bahia",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Barão do Rio Branco",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Bela Vista",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Bento Gonçalves",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Berlim",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Blumenau",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Boa Vista",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Bom Jardim",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Brasília",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Carlos Biehl",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Carlos Gomes",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Carlos Rausch",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Castro Alves",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Ceará",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Cecília Meireles",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Coronel Pedro Schneider",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Cristiano Wolffenbüttel",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Curitiba",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Deodoro da Fonseca",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Do Moinho",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Dom Pedro I",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Dom Pedro II",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Duque de Caxias",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Edgar Hoffmeister",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Esperança",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Espírito Santo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Esteio",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Floriano Peixoto",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Florianópolis",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Fortaleza",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Francisco Alves",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Frei Caneca",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Garibaldi",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua General Osório",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Getúlio Vargas",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Goiás",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Gramado",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Guilherme Schütz",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Henrique Bier",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Imigrante",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Independência",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Ipiranga",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Irineu Becker",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Jacob Walter",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Joinville",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua José de Alencar",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua João Alfredo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua João Pessoa",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Júlio de Castilhos",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Lindolfo Collor",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Machado de Assis",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Mal. Deodoro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Maranhão",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Marechal Floriano",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Mato Grosso",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Minas Gerais",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Moinho Velho",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Monte Castelo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Navegantes",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Novo Hamburgo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Olavo Bilac",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Osvaldo Cruz",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Paraná",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Paraíba",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Pará",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Piauí",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Pinheiro Machado",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Pomerânia",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Porto Alegre",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Presidente Costa e Silva",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Presidente Kennedy",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Presidente Lucena",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Presidente Vargas",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Primavera",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Princesa Isabel",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Quintino Bocaiúva",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Quinze de Novembro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Riachuelo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Rio Grande do Norte",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Rio Grande do Sul",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Rio de Janeiro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Rondônia",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Roraima",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Santa Catarina",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Santa Cruz",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Santa Lúcia",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Santa Maria",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Santos Dumont",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Sapiranga",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Sergipe",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Sete de Setembro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Sobradinho",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Borja",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Cristóvão",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Francisco",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Gabriel",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Jerônimo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São José",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Leopoldo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Luís",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Mateus",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Miguel",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Paulo",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Pedro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua São Roque",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Tiradentes",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Tocantins",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Três de Maio",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua União",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Vale Verde",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Vinte de Setembro",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Visconde de Mauá",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Visconde de Taunay",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Voluntários da Pátria",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua da Paz",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua das Acácias",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua das Camélias",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua das Flores",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua das Hortênsias",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua das Palmeiras",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua das Rosas",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua dos Imigrantes",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua dos Ipês",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua dos Jasmins",
+        "highway": "residential"
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Rua Érico Veríssimo",
+        "highway": "residential"
+      },
+      "geometry": null
+    }
+  ]
+}

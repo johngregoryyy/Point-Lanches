@@ -1,0 +1,887 @@
+# database/db.py - Conexão SQLite e operações CRUD (v2)
+# =============================================================================
+
+import sqlite3
+import os
+import sys
+
+
+def get_base_dir() -> str:
+    """
+    Retorna o diretório base persistente da aplicação:
+    - Se executado via PyInstaller (.exe), retorna a pasta onde o executável está salvo.
+    - Se executado em desenvolvimento (.py), retorna a raiz do projeto.
+    Isso garante que o banco de dados SQLite nunca seja apagado em builds --onefile ou --onedir.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_resource_path(relative_path: str = "") -> str:
+    """
+    Retorna o caminho de recursos empacotados (assets, imagens, temas):
+    - Se empacotado pelo PyInstaller, aponta para sys._MEIPASS.
+    - Se em desenvolvimento, aponta para a raiz do projeto.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative_path) if relative_path else base
+
+
+DB_PATH = os.path.join(get_base_dir(), "point_lanches.db")
+
+
+def get_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def init_db():
+    """Cria/migra tabelas."""
+    with get_connection() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS categorias (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS produtos (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                categoria_id INTEGER NOT NULL REFERENCES categorias(id),
+                nome         TEXT NOT NULL,
+                descricao    TEXT DEFAULT '',
+                preco        REAL NOT NULL,
+                ativo        INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS adicionais (
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome  TEXT NOT NULL,
+                preco REAL NOT NULL,
+                ativo INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS taxas_entrega (
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                valor REAL NOT NULL,
+                label TEXT NOT NULL,
+                ativo INTEGER DEFAULT 1,
+                ordem INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS pedidos (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero          INTEGER NOT NULL,
+                cliente_nome    TEXT DEFAULT '',
+                cliente_fone    TEXT DEFAULT '',
+                endereco_rua    TEXT DEFAULT '',
+                endereco_num    TEXT DEFAULT '',
+                endereco_comp   TEXT DEFAULT '',
+                endereco_bairro TEXT DEFAULT '',
+                endereco_ref    TEXT DEFAULT '',
+                subtotal        REAL DEFAULT 0,
+                taxa_entrega    REAL DEFAULT 0,
+                total           REAL DEFAULT 0,
+                forma_pgto      TEXT DEFAULT '',
+                valor_pago      REAL DEFAULT 0,
+                troco           REAL DEFAULT 0,
+                status          TEXT DEFAULT 'aberto',
+                criado_em       TEXT DEFAULT (datetime('now','localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS itens_pedido (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                pedido_id  INTEGER NOT NULL REFERENCES pedidos(id),
+                produto_id INTEGER REFERENCES produtos(id),
+                nome       TEXT NOT NULL,
+                preco_unit REAL NOT NULL,
+                quantidade INTEGER NOT NULL DEFAULT 1,
+                observacao TEXT DEFAULT '',
+                categoria  TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS configuracoes (
+                chave TEXT PRIMARY KEY,
+                valor TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS observacoes_padrao (
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                texto TEXT NOT NULL,
+                ativo INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS ruas (
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome  TEXT NOT NULL UNIQUE,
+                ativo INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS insumos (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome           TEXT NOT NULL,
+                unidade_medida TEXT NOT NULL,
+                custo_unitario REAL NOT NULL DEFAULT 0.0,
+                estoque_atual  REAL NOT NULL DEFAULT 0.0,
+                ativo          INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS movimentacoes_insumos (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                insumo_id   INTEGER NOT NULL REFERENCES insumos(id),
+                tipo        TEXT NOT NULL,
+                quantidade  REAL NOT NULL,
+                valor_total REAL NOT NULL,
+                data        TEXT NOT NULL
+            );
+        """)
+
+        # Migrações seguras (ignoram erro se coluna já existe)
+        for sql in [
+            "ALTER TABLE itens_pedido ADD COLUMN categoria TEXT DEFAULT ''",
+        ]:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass
+
+
+# ── Produtos ──────────────────────────────────────────────────────────────────
+
+def listar_categorias(incluir_extras=False):
+    with get_connection() as conn:
+        q = "SELECT * FROM categorias"
+        if not incluir_extras:
+            q += " WHERE LOWER(nome) != 'extras'"
+        q += " ORDER BY id"
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def listar_produtos(categoria_id=None):
+    with get_connection() as conn:
+        if categoria_id:
+            rows = conn.execute(
+                "SELECT p.*, c.nome as categoria FROM produtos p "
+                "JOIN categorias c ON c.id = p.categoria_id "
+                "WHERE p.categoria_id=? AND p.ativo=1 ORDER BY p.nome",
+                (categoria_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT p.*, c.nome as categoria FROM produtos p "
+                "JOIN categorias c ON c.id = p.categoria_id "
+                "WHERE p.ativo=1 ORDER BY c.id, p.nome"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def adicionar_produto(categoria_id, nome, descricao, preco):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO produtos (categoria_id, nome, descricao, preco) VALUES (?,?,?,?)",
+            (categoria_id, nome, descricao, preco)
+        )
+
+
+def atualizar_produto(produto_id, nome, descricao, preco, categoria_id, ativo=1):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE produtos SET nome=?, descricao=?, preco=?, categoria_id=?, ativo=? WHERE id=?",
+            (nome, descricao, preco, categoria_id, ativo, produto_id)
+        )
+
+
+def remover_produto(produto_id):
+    with get_connection() as conn:
+        conn.execute("UPDATE produtos SET ativo=0 WHERE id=?", (produto_id,))
+
+
+def adicionar_categoria(nome):
+    with get_connection() as conn:
+        conn.execute("INSERT OR IGNORE INTO categorias (nome) VALUES (?)", (nome,))
+
+
+def get_categoria_por_nome(nome):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM categorias WHERE nome=?", (nome,)
+        ).fetchone()
+        return row["id"] if row else None
+
+
+# ── Adicionais ────────────────────────────────────────────────────────────────
+
+def listar_adicionais(apenas_ativos=True):
+    with get_connection() as conn:
+        q = "SELECT * FROM adicionais"
+        if apenas_ativos:
+            q += " WHERE ativo=1"
+        q += " ORDER BY nome"
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def adicionar_adicional(nome, preco):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO adicionais (nome, preco) VALUES (?,?)",
+            (nome, preco)
+        )
+
+
+def atualizar_adicional(adicional_id, nome, preco, ativo=1):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE adicionais SET nome=?, preco=?, ativo=? WHERE id=?",
+            (nome, preco, ativo, adicional_id)
+        )
+
+
+# ── Taxas de Entrega ──────────────────────────────────────────────────────────
+
+def listar_taxas(apenas_ativas=True):
+    with get_connection() as conn:
+        q = "SELECT * FROM taxas_entrega"
+        if apenas_ativas:
+            q += " WHERE ativo=1"
+        q += " ORDER BY valor"
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def adicionar_taxa(valor, label, ativo=1):
+    ordem = int(valor * 100)
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO taxas_entrega (valor, label, ativo, ordem) VALUES (?,?,?,?)",
+            (valor, label, ativo, ordem)
+        )
+
+
+def atualizar_taxa(taxa_id, valor, label, ativo=1):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE taxas_entrega SET valor=?, label=?, ativo=? WHERE id=?",
+            (valor, label, ativo, taxa_id)
+        )
+
+
+def remover_taxa(taxa_id):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM taxas_entrega WHERE id=?", (taxa_id,))
+
+
+# ── Pedidos ───────────────────────────────────────────────────────────────────
+
+def proximo_numero_pedido():
+    with get_connection() as conn:
+        row = conn.execute("SELECT MAX(numero) as m FROM pedidos").fetchone()
+        return (row["m"] or 0) + 1
+
+
+def salvar_pedido(pedido: dict, itens: list) -> int:
+    numero = proximo_numero_pedido()
+    with get_connection() as conn:
+        cur = conn.execute("""
+            INSERT INTO pedidos
+              (numero, cliente_nome, cliente_fone, endereco_rua, endereco_num,
+               endereco_comp, endereco_bairro, endereco_ref,
+               subtotal, taxa_entrega, total, forma_pgto, valor_pago, troco, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'fechado')
+        """, (
+            numero,
+            pedido.get("cliente_nome", ""),
+            pedido.get("cliente_fone", ""),
+            pedido.get("rua", ""),
+            pedido.get("numero", ""),
+            pedido.get("complemento", ""),
+            pedido.get("bairro", ""),
+            pedido.get("referencia", ""),
+            pedido.get("subtotal", 0),
+            pedido.get("taxa_entrega", 0),
+            pedido.get("total", 0),
+            pedido.get("forma_pgto", ""),
+            pedido.get("valor_pago", 0),
+            pedido.get("troco", 0),
+        ))
+        pedido_id = cur.lastrowid
+        for item in itens:
+            conn.execute("""
+                INSERT INTO itens_pedido
+                  (pedido_id, produto_id, nome, preco_unit, quantidade, observacao, categoria)
+                VALUES (?,?,?,?,?,?,?)
+            """, (
+                pedido_id,
+                item.get("produto_id"),
+                item["nome"],
+                item["preco_unit"],
+                item["quantidade"],
+                item.get("observacao", ""),
+                item.get("categoria", ""),
+            ))
+    return pedido_id
+
+
+def listar_pedidos(limit=100):
+    with get_connection() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM pedidos ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()]
+
+
+def get_pedido_com_itens(pedido_id: int):
+    """Retorna (pedido_dict, [itens_dict])."""
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM pedidos WHERE id=?", (pedido_id,)).fetchone()
+        if not row:
+            return None, []
+        pedido = dict(row)
+        itens = [dict(r) for r in conn.execute(
+            "SELECT * FROM itens_pedido WHERE pedido_id=?", (pedido_id,)
+        ).fetchall()]
+    return pedido, itens
+
+
+def excluir_pedido(pedido_id: int) -> bool:
+    """Exclui um pedido e seus itens associados."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM itens_pedido WHERE pedido_id=?", (pedido_id,))
+        conn.execute("DELETE FROM pedidos WHERE id=?", (pedido_id,))
+    return True
+
+
+# ── Balanço Geral e Fechamento ────────────────────────────────────────────────
+
+def calcular_balanco_mensal(mes: int, ano: int) -> dict:
+    """
+    Calcula o faturamento e balanço consolidado de um mês/ano específico.
+    Retorna indicadores gerais, detalhamento por modalidade e estrutura
+    preparada para custos/insumos futuros.
+    """
+    prefix = f"{ano:04d}-{mes:02d}%"
+    with get_connection() as conn:
+        pedidos = conn.execute("""
+            SELECT id, numero, total, subtotal, taxa_entrega, forma_pgto, criado_em
+            FROM pedidos
+            WHERE criado_em LIKE ?
+        """, (prefix,)).fetchall()
+
+        total_pedidos = len(pedidos)
+        faturamento_total = sum(p["total"] or 0.0 for p in pedidos)
+        total_taxas = sum(p["taxa_entrega"] or 0.0 for p in pedidos)
+        ticket_medio = (faturamento_total / total_pedidos) if total_pedidos > 0 else 0.0
+
+        modalidades = {
+            "PIX": {"total": 0.0, "qtd": 0},
+            "Dinheiro": {"total": 0.0, "qtd": 0},
+            "Cartão de Débito": {"total": 0.0, "qtd": 0},
+            "Cartão de Crédito": {"total": 0.0, "qtd": 0},
+            "Outros": {"total": 0.0, "qtd": 0},
+        }
+
+        for p in pedidos:
+            fp = (p["forma_pgto"] or "").upper()
+            val = p["total"] or 0.0
+            if "PIX" in fp:
+                modalidades["PIX"]["total"] += val
+                modalidades["PIX"]["qtd"] += 1
+            elif "DINHEIRO" in fp:
+                modalidades["Dinheiro"]["total"] += val
+                modalidades["Dinheiro"]["qtd"] += 1
+            elif "DÉBITO" in fp or "DEBITO" in fp:
+                modalidades["Cartão de Débito"]["total"] += val
+                modalidades["Cartão de Débito"]["qtd"] += 1
+            elif "CRÉDITO" in fp or "CREDITO" in fp or "CARTÃO" in fp or "CARTAO" in fp:
+                modalidades["Cartão de Crédito"]["total"] += val
+                modalidades["Cartão de Crédito"]["qtd"] += 1
+            else:
+                modalidades["Outros"]["total"] += val
+                modalidades["Outros"]["qtd"] += 1
+
+        # Custos de insumos (estrutura de backend preparada para insumos futuros)
+        row_custo = conn.execute("""
+            SELECT COALESCE(SUM(valor_total), 0.0) as custo
+            FROM movimentacoes_insumos
+            WHERE tipo='entrada' AND data LIKE ?
+        """, (prefix,)).fetchone()
+        custo_insumos = float(row_custo["custo"]) if row_custo else 0.0
+
+        lucro_bruto = faturamento_total - custo_insumos
+
+        return {
+            "mes": mes,
+            "ano": ano,
+            "total_pedidos": total_pedidos,
+            "faturamento_total": faturamento_total,
+            "total_taxas": total_taxas,
+            "ticket_medio": ticket_medio,
+            "custo_insumos": custo_insumos,
+            "lucro_bruto": lucro_bruto,
+            "modalidades": modalidades,
+        }
+
+
+
+# ── Configurações ─────────────────────────────────────────────────────────────
+
+def get_config(chave, default=None):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT valor FROM configuracoes WHERE chave=?", (chave,)
+        ).fetchone()
+        return row["valor"] if row else default
+
+
+def set_config(chave, valor):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?,?)",
+            (chave, str(valor))
+        )
+
+
+# ── Observações Rápidas ───────────────────────────────────────────────────────
+
+def listar_observacoes_padrao(apenas_ativas=True):
+    with get_connection() as conn:
+        q = "SELECT * FROM observacoes_padrao"
+        if apenas_ativas:
+            q += " WHERE ativo=1"
+        q += " ORDER BY texto"
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def adicionar_observacao_padrao(texto):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO observacoes_padrao (texto) VALUES (?)",
+            (texto,)
+        )
+
+
+def atualizar_observacao_padrao(obs_id, texto, ativo=1):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE observacoes_padrao SET texto=?, ativo=? WHERE id=?",
+            (texto, ativo, obs_id)
+        )
+
+
+def remover_observacao_padrao(obs_id):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM observacoes_padrao WHERE id=?", (obs_id,))
+
+
+# ── Ruas de Dois Irmãos e GeoJSON ─────────────────────────────────────────────
+
+RUAS_OFICIAIS_DOIS_IRMAOS = [
+    # Avenidas Principais
+    "Av. São Miguel",
+    "Av. Sapiranga",
+    "Av. Florestal",
+    "Av. Irineu Becker",
+    "Av. Central",
+    "Av. das Palmeiras",
+    "Av. Porto Alegre",
+    "Av. 10 de Setembro",
+    # Estradas e Travessões
+    "Estrada Travessão",
+    "Estrada Morro Reuter",
+    "Estrada Picada 48",
+    "Estrada Linha Imperial",
+    "Estrada Campo Bom",
+    "Estrada da Amizade",
+    # Ruas
+    "Rua 10 de Setembro",
+    "Rua 25 de Julho",
+    "Rua 20 de Setembro",
+    "Rua 21 de Abril",
+    "Rua Acre",
+    "Rua Alagoas",
+    "Rua Alberto Rübenich",
+    "Rua Alberto Schmidt",
+    "Rua Albino Wendling",
+    "Rua Aloísio Herbert",
+    "Rua Alvorada",
+    "Rua Amapá",
+    "Rua Amazonas",
+    "Rua Anita Garibaldi",
+    "Rua Arlindo Becker",
+    "Rua Arthur Strassburger",
+    "Rua Bahia",
+    "Rua Barão do Rio Branco",
+    "Rua Bela Vista",
+    "Rua Bento Gonçalves",
+    "Rua Berlim",
+    "Rua Blumenau",
+    "Rua Boa Vista",
+    "Rua Bom Jardim",
+    "Rua Brasília",
+    "Rua Carlos Biehl",
+    "Rua Carlos Gomes",
+    "Rua Carlos Rausch",
+    "Rua Ceará",
+    "Rua Cecília Meireles",
+    "Rua Castro Alves",
+    "Rua Coronel Pedro Schneider",
+    "Rua Cristiano Wolffenbüttel",
+    "Rua Curitiba",
+    "Rua da Paz",
+    "Rua das Acácias",
+    "Rua das Camélias",
+    "Rua das Flores",
+    "Rua das Hortênsias",
+    "Rua das Palmeiras",
+    "Rua das Rosas",
+    "Rua Deodoro da Fonseca",
+    "Rua Do Moinho",
+    "Rua Dom Pedro I",
+    "Rua Dom Pedro II",
+    "Rua dos Imigrantes",
+    "Rua dos Ipês",
+    "Rua dos Jasmins",
+    "Rua Duque de Caxias",
+    "Rua Edgar Hoffmeister",
+    "Rua Érico Veríssimo",
+    "Rua Esperança",
+    "Rua Espírito Santo",
+    "Rua Esteio",
+    "Rua Floriano Peixoto",
+    "Rua Florianópolis",
+    "Rua Fortaleza",
+    "Rua Francisco Alves",
+    "Rua Frei Caneca",
+    "Rua Garibaldi",
+    "Rua General Osório",
+    "Rua Getúlio Vargas",
+    "Rua Goiás",
+    "Rua Gramado",
+    "Rua Guilherme Schütz",
+    "Rua Henrique Bier",
+    "Rua Imigrante",
+    "Rua Independência",
+    "Rua Ipiranga",
+    "Rua Irineu Becker",
+    "Rua Jacob Walter",
+    "Rua João Alfredo",
+    "Rua João Pessoa",
+    "Rua Joinville",
+    "Rua José de Alencar",
+    "Rua Júlio de Castilhos",
+    "Rua Lindolfo Collor",
+    "Rua Machado de Assis",
+    "Rua Mal. Deodoro",
+    "Rua Maranhão",
+    "Rua Marechal Floriano",
+    "Rua Mato Grosso",
+    "Rua Minas Gerais",
+    "Rua Moinho Velho",
+    "Rua Monte Castelo",
+    "Rua Navegantes",
+    "Rua Novo Hamburgo",
+    "Rua Olavo Bilac",
+    "Rua Osvaldo Cruz",
+    "Rua Pará",
+    "Rua Paraíba",
+    "Rua Paraná",
+    "Rua Piauí",
+    "Rua Pinheiro Machado",
+    "Rua Pomerânia",
+    "Rua Porto Alegre",
+    "Rua Primavera",
+    "Rua Princesa Isabel",
+    "Rua Presidente Costa e Silva",
+    "Rua Presidente Kennedy",
+    "Rua Presidente Lucena",
+    "Rua Presidente Vargas",
+    "Rua Quinze de Novembro",
+    "Rua Quintino Bocaiúva",
+    "Rua Riachuelo",
+    "Rua Rio de Janeiro",
+    "Rua Rio Grande do Norte",
+    "Rua Rio Grande do Sul",
+    "Rua Rondônia",
+    "Rua Roraima",
+    "Rua Santa Catarina",
+    "Rua Santa Cruz",
+    "Rua Santa Lúcia",
+    "Rua Santa Maria",
+    "Rua Santos Dumont",
+    "Rua São Borja",
+    "Rua São Cristóvão",
+    "Rua São Francisco",
+    "Rua São Gabriel",
+    "Rua São Jerônimo",
+    "Rua São José",
+    "Rua São Leopoldo",
+    "Rua São Luís",
+    "Rua São Mateus",
+    "Rua São Miguel",
+    "Rua São Paulo",
+    "Rua São Pedro",
+    "Rua São Roque",
+    "Rua Sapiranga",
+    "Rua Sete de Setembro",
+    "Rua Sergipe",
+    "Rua Sobradinho",
+    "Rua Tiradentes",
+    "Rua Tocantins",
+    "Rua Três de Maio",
+    "Rua União",
+    "Rua Vale Verde",
+    "Rua Vinte de Setembro",
+    "Rua Visconde de Mauá",
+    "Rua Visconde de Taunay",
+    "Rua Voluntários da Pátria",
+]
+
+
+def listar_ruas(apenas_ativas=True):
+    with get_connection() as conn:
+        q = "SELECT * FROM ruas"
+        if apenas_ativas:
+            q += " WHERE ativo=1"
+        q += " ORDER BY nome COLLATE NOCASE"
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def adicionar_rua(nome: str, ativo: int = 1):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO ruas (nome, ativo) VALUES (?, ?)",
+            (nome.strip(), ativo)
+        )
+
+
+def remover_rua(rua_id: int):
+    with get_connection() as conn:
+        conn.execute("UPDATE ruas SET ativo=0 WHERE id=?", (rua_id,))
+
+
+def importar_ruas_geojson(caminho: str = None) -> int:
+    """
+    Importa e saneia vias a partir de arquivo GeoJSON (OpenStreetMap/Overpass API).
+    1. Extrai a tag 'name' de features onde 'highway' está presente.
+    2. Remove duplicatas, registros vazios e normaliza espaçamentos.
+    3. Popula a tabela 'ruas' no SQLite local.
+    4. Se o GeoJSON estiver vazio ou ausente, usa a base oficial saneada de Dois Irmãos
+       e grava o arquivo export.geojson com formato GeoJSON válido.
+    Retorna o total de ruas ativas cadastradas.
+    """
+    import json
+    import os
+
+    candidatos = []
+    if caminho:
+        candidatos.append(caminho)
+    # Procurar export.geojson no diretório raiz do projeto e em Downloads
+    candidatos.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "export.geojson"))
+    candidatos.append(os.path.join(os.path.expanduser("~"), "Downloads", "export.geojson"))
+
+    ruas_encontradas = set()
+
+    for p in candidatos:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    dados = json.load(f)
+                features = dados.get("features", [])
+                for feat in features:
+                    props = feat.get("properties", {})
+                    if "highway" in props or "name" in props:
+                        nome = props.get("name")
+                        if nome and isinstance(nome, str):
+                            nome_limpo = " ".join(nome.split()).strip()
+                            if len(nome_limpo) >= 2:
+                                ruas_encontradas.add(nome_limpo)
+                if ruas_encontradas:
+                    break
+            except Exception:
+                pass
+
+    # Fallback oficial caso o GeoJSON do overpass esteja vazio
+    if not ruas_encontradas:
+        ruas_encontradas = set(RUAS_OFICIAIS_DOIS_IRMAOS)
+        geojson_conteudo = {
+            "type": "FeatureCollection",
+            "generator": "PointLanches-GeoSanitizer",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"name": r, "highway": "residential"},
+                    "geometry": None
+                }
+                for r in sorted(ruas_encontradas)
+            ]
+        }
+        destinos = [p for p in candidatos if p.endswith("export.geojson")]
+        for dest in destinos:
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as f:
+                    json.dump(geojson_conteudo, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+
+    with get_connection() as conn:
+        for r in sorted(ruas_encontradas):
+            conn.execute(
+                "INSERT OR IGNORE INTO ruas (nome, ativo) VALUES (?, 1)",
+                (r,)
+            )
+
+    return len(ruas_encontradas)
+
+
+# ── Backup e Portabilidade (Exportar / Importar JSON) ─────────────────────────
+
+def exportar_dados_json() -> dict:
+    """
+    Consolida produtos, categorias, adicionais, taxas de entrega,
+    observações rápidas e configurações gerais em uma estrutura JSON para backup.
+    """
+    from datetime import datetime
+    with get_connection() as conn:
+        categorias = [dict(r) for r in conn.execute("SELECT * FROM categorias ORDER BY id").fetchall()]
+        produtos = [dict(r) for r in conn.execute("""
+            SELECT p.*, c.nome as categoria_nome
+            FROM produtos p
+            JOIN categorias c ON c.id = p.categoria_id
+            ORDER BY c.id, p.nome
+        """).fetchall()]
+        adicionais = [dict(r) for r in conn.execute("SELECT * FROM adicionais ORDER BY id").fetchall()]
+        taxas = [dict(r) for r in conn.execute("SELECT * FROM taxas_entrega ORDER BY ordem, valor").fetchall()]
+        observacoes = [dict(r) for r in conn.execute("SELECT * FROM observacoes_padrao ORDER BY id").fetchall()]
+        configuracoes = {r["chave"]: r["valor"] for r in conn.execute("SELECT * FROM configuracoes").fetchall()}
+        ruas = [dict(r) for r in conn.execute("SELECT * FROM ruas ORDER BY nome").fetchall()]
+
+    return {
+        "versao_schema": "1.0",
+        "data_exportacao": datetime.now().isoformat(),
+        "sistema": "Point Lanches",
+        "categorias": categorias,
+        "produtos": produtos,
+        "adicionais": adicionais,
+        "taxas_entrega": taxas,
+        "observacoes_padrao": observacoes,
+        "configuracoes": configuracoes,
+        "ruas": ruas,
+    }
+
+
+def importar_dados_json(dados: dict) -> tuple[bool, str]:
+    """
+    Importa configurações a partir de um dicionário estruturado JSON.
+    Executa a substituição das tabelas de configuração em transação única e segura.
+    Retorna (True, mensagem) ou (False, mensagem_erro).
+    """
+    if not isinstance(dados, dict):
+        return False, "Formato inválido: o conteúdo do backup deve ser um objeto JSON."
+
+    if not any(k in dados for k in ("categorias", "produtos", "adicionais", "taxas_entrega", "observacoes_padrao", "configuracoes")):
+        return False, "O arquivo selecionado não contém dados de configuração reconhecíveis do Point Lanches."
+
+    try:
+        with get_connection() as conn:
+            # 1. Categorias
+            if "categorias" in dados and isinstance(dados["categorias"], list):
+                for cat in dados["categorias"]:
+                    if "nome" in cat:
+                        conn.execute("INSERT OR IGNORE INTO categorias (nome) VALUES (?)", (cat["nome"],))
+
+            # 2. Produtos
+            if "produtos" in dados and isinstance(dados["produtos"], list):
+                for prod in dados["produtos"]:
+                    cat_id = prod.get("categoria_id")
+                    cat_nome = prod.get("categoria_nome")
+                    if cat_nome and not cat_id:
+                        r = conn.execute("SELECT id FROM categorias WHERE nome=?", (cat_nome,)).fetchone()
+                        if r:
+                            cat_id = r["id"]
+                        else:
+                            cur = conn.execute("INSERT INTO categorias (nome) VALUES (?)", (cat_nome,))
+                            cat_id = cur.lastrowid
+
+                    if cat_id and prod.get("nome"):
+                        row_p = conn.execute("SELECT id FROM produtos WHERE nome=?", (prod["nome"],)).fetchone()
+                        if row_p:
+                            conn.execute("""
+                                UPDATE produtos
+                                SET categoria_id=?, descricao=?, preco=?, ativo=?
+                                WHERE id=?
+                            """, (
+                                cat_id, prod.get("descricao", ""),
+                                prod.get("preco", 0.0), prod.get("ativo", 1),
+                                row_p["id"]
+                            ))
+                        else:
+                            conn.execute("""
+                                INSERT INTO produtos (categoria_id, nome, descricao, preco, ativo)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (
+                                cat_id, prod["nome"],
+                                prod.get("descricao", ""), prod.get("preco", 0.0),
+                                prod.get("ativo", 1)
+                            ))
+
+            # 3. Adicionais
+            if "adicionais" in dados and isinstance(dados["adicionais"], list):
+                for ad in dados["adicionais"]:
+                    if ad.get("nome"):
+                        row_a = conn.execute("SELECT id FROM adicionais WHERE nome=?", (ad["nome"],)).fetchone()
+                        if row_a:
+                            conn.execute("UPDATE adicionais SET preco=?, ativo=? WHERE id=?",
+                                         (ad.get("preco", 0.0), ad.get("ativo", 1), row_a["id"]))
+                        else:
+                            conn.execute("INSERT INTO adicionais (nome, preco, ativo) VALUES (?, ?, ?)",
+                                         (ad["nome"], ad.get("preco", 0.0), ad.get("ativo", 1)))
+
+            # 4. Observações Rápidas
+            if "observacoes_padrao" in dados and isinstance(dados["observacoes_padrao"], list):
+                for obs in dados["observacoes_padrao"]:
+                    if obs.get("texto"):
+                        row_o = conn.execute("SELECT id FROM observacoes_padrao WHERE texto=?", (obs["texto"],)).fetchone()
+                        if row_o:
+                            conn.execute("UPDATE observacoes_padrao SET ativo=? WHERE id=?",
+                                         (obs.get("ativo", 1), row_o["id"]))
+                        else:
+                            conn.execute("INSERT INTO observacoes_padrao (texto, ativo) VALUES (?, ?)",
+                                         (obs["texto"], obs.get("ativo", 1)))
+
+            # 5. Taxas de Entrega
+            if "taxas_entrega" in dados and isinstance(dados["taxas_entrega"], list):
+                for taxa in dados["taxas_entrega"]:
+                    if "valor" in taxa:
+                        v = float(taxa["valor"])
+                        lbl = taxa.get("label", f"R$ {v:.2f}")
+                        ordem = taxa.get("ordem", int(v * 100))
+                        ativo = taxa.get("ativo", 1)
+                        row_t = conn.execute("SELECT id FROM taxas_entrega WHERE valor=?", (v,)).fetchone()
+                        if row_t:
+                            conn.execute("UPDATE taxas_entrega SET label=?, ativo=?, ordem=? WHERE id=?",
+                                         (lbl, ativo, ordem, row_t["id"]))
+                        else:
+                            conn.execute("INSERT INTO taxas_entrega (valor, label, ativo, ordem) VALUES (?, ?, ?, ?)",
+                                         (v, lbl, ativo, ordem))
+
+            # 6. Configurações gerais (impressora, ip, etc.)
+            if "configuracoes" in dados and isinstance(dados["configuracoes"], dict):
+                for k, v in dados["configuracoes"].items():
+                    conn.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (k, str(v)))
+
+            # 7. Ruas
+            if "ruas" in dados and isinstance(dados["ruas"], list):
+                for r in dados["ruas"]:
+                    if r.get("nome"):
+                        conn.execute("INSERT OR IGNORE INTO ruas (nome, ativo) VALUES (?, ?)",
+                                     (r["nome"], r.get("ativo", 1)))
+
+        return True, "Configurações importadas e aplicadas com sucesso!"
+    except Exception as e:
+        return False, f"Falha na importação: {str(e)}"
+
+
