@@ -6,16 +6,51 @@ import os
 import sys
 
 
+def _can_write_to_dir(folder: str) -> bool:
+    """Testa se o diretório permite criação, escrita e exclusão de arquivos pelo usuário atual."""
+    try:
+        os.makedirs(folder, exist_ok=True)
+        test_file = os.path.join(folder, f".write_test_{os.getpid()}.tmp")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("test")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+
 def get_base_dir() -> str:
     """
-    Retorna o diretório base persistente da aplicação:
-    - Se executado via PyInstaller (.exe), retorna a pasta onde o executável está salvo.
-    - Se executado em desenvolvimento (.py), retorna a raiz do projeto.
-    Isso garante que o banco de dados SQLite nunca seja apagado em builds --onefile ou --onedir.
+    Retorna o diretório base persistente da aplicação para o banco SQLite:
+    1. Se o diretório do executável (.exe) for gravável (modo portátil / dev), usa ele.
+    2. Se não for gravável (ex: C:\\Program Files com UAC ativo), usa %LOCALAPPDATA%\\Point Lanches.
+    Isso impede o erro 'sqlite3.OperationalError: unable to open database file'.
     """
     if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        if _can_write_to_dir(exe_dir):
+            return exe_dir
+
+        # Fallback seguro para Program Files: dados persistidos no perfil do usuário
+        app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+        point_data = os.path.join(app_data, "Point Lanches")
+        os.makedirs(point_data, exist_ok=True)
+
+        # Se houver um point_lanches.db pré-existente na pasta do executável, migra para cá
+        existing_db = os.path.join(exe_dir, "point_lanches.db")
+        target_db = os.path.join(point_data, "point_lanches.db")
+        if os.path.isfile(existing_db) and not os.path.isfile(target_db):
+            try:
+                import shutil
+                shutil.copy2(existing_db, target_db)
+            except Exception:
+                pass
+
+        return point_data
+
+    dev_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.makedirs(dev_dir, exist_ok=True)
+    return dev_dir
 
 
 def get_resource_path(relative_path: str = "") -> str:
@@ -31,11 +66,16 @@ def get_resource_path(relative_path: str = "") -> str:
     return os.path.join(base, relative_path) if relative_path else base
 
 
-DB_PATH = os.path.join(get_base_dir(), "point_lanches.db")
+def get_db_path() -> str:
+    return os.path.join(get_base_dir(), "point_lanches.db")
+
+
+DB_PATH = get_db_path()
 
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    db_file = get_db_path()
+    conn = sqlite3.connect(db_file)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")

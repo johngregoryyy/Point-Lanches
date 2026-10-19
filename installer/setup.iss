@@ -2,7 +2,7 @@
 ; =============================================================================
 
 #define MyAppName "Point Lanches"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Point Lanches"
 #define MyAppURL "https://github.com/johngregoryyy/Point-Lanches"
 #define MyAppExeName "PointLanches.exe"
@@ -27,7 +27,11 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+
+[Dirs]
+Name: "{app}"; Permissions: users-full
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
