@@ -1,6 +1,5 @@
-# main.py - Ponto de entrada do Point Lanches
-# =============================================================================
-
+import os
+import sys
 import customtkinter as ctk
 
 from config import (
@@ -33,6 +32,16 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(TITULO_APP)
+
+        # ── Ícone oficial da aplicação ──
+        try:
+            icon_path = os.path.join(getattr(sys, '_MEIPASS', os.path.abspath(".")), "assets", "images.ico")
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(getattr(sys, '_MEIPASS', os.path.abspath(".")), "Assets", "images.ico")
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+        except Exception:
+            pass
 
         # ── Detecção dinâmica de tela (1366x768 vs Full HD) ──
         self.update_idletasks()

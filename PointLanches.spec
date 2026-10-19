@@ -11,6 +11,8 @@ block_cipher = None
 # 1. Coleta automática de todos os dados e submódulos do CustomTkinter
 # (inclui arquivos JSON de temas, fontes OTF/TTF e assets gráficos)
 datas = collect_data_files('customtkinter')
+# Incluir pasta assets com o ícone oficial da aplicação
+datas += [('assets', 'assets')]
 
 # 2. Módulos ocultos para garantir inclusão completa
 hiddenimports = [
@@ -80,7 +82,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='icon.ico',             # Descomente se tiver um arquivo .ico
+    icon='assets/images.ico',
 )
 
 coll = COLLECT(

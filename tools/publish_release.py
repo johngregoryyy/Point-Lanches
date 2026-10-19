@@ -112,6 +112,44 @@ def get_gh_path() -> str | None:
     )
 
 
+def get_iscc_path() -> str | None:
+    """Localiza o compilador do Inno Setup (ISCC.exe)."""
+    return find_executable(
+        ["ISCC", "ISCC.exe", "iscc", "iscc.exe"],
+        [
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"),
+            r"C:\Program Files\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 7\ISCC.exe"),
+            r"C:\Program Files\Inno Setup 7\ISCC.exe",
+            r"C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
+        ]
+    )
+
+
+def compile_with_inno_setup(new_version: str) -> str | None:
+    """Compila o script installer/setup.iss usando o Inno Setup."""
+    iscc_path = get_iscc_path()
+    iss_file = os.path.join(BASE_DIR, "installer", "setup.iss")
+    if not iscc_path or not os.path.isfile(iss_file):
+        return None
+
+    print(f"  [INNO] Compilando instalador oficial com Inno Setup...")
+    cmd = [
+        iscc_path,
+        f"/DMyAppVersion={new_version}",
+        iss_file
+    ]
+    res = subprocess.run(cmd, cwd=BASE_DIR)
+    if res.returncode == 0:
+        expected_setup = os.path.join(BASE_DIR, "dist", f"PointLanches-Setup-v{new_version}.exe")
+        if os.path.isfile(expected_setup):
+            print(f"  [OK] Instalador gerado: {os.path.basename(expected_setup)}")
+            return expected_setup
+    print("  [AVISO] Falha ao compilar com Inno Setup.")
+    return None
+
+
 def carregar_token_salvo() -> str | None:
     """Verifica se existe um token salvo em arquivo .github_token ou variável de ambiente."""
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
@@ -230,6 +268,19 @@ def prepare_release_artifacts(new_version: str) -> list[str]:
 
     elif os.path.isfile(single_exe):
         artifacts.append(single_exe)
+
+    # 3. Localizar instalador oficial Inno Setup se presente em dist/
+    setup_name = f"PointLanches-Setup-v{new_version}.exe"
+    setup_path = os.path.join(dist_dir, setup_name)
+    if os.path.isfile(setup_path):
+        artifacts.append(setup_path)
+    else:
+        for f in os.listdir(dist_dir):
+            if "setup" in f.lower() and f.endswith(".exe") and new_version in f:
+                setup_found = os.path.join(dist_dir, f)
+                if setup_found not in artifacts:
+                    artifacts.append(setup_found)
+                break
 
     return artifacts
 
@@ -504,6 +555,12 @@ def main():
             print("[ERRO] Falha na compilacao do executavel com PyInstaller.")
             sys.exit(1)
         print("  [OK] Compilacao concluida com sucesso!")
+
+        # Compilar Instalador Inno Setup se disponível
+        iscc_path = get_iscc_path()
+        if iscc_path:
+            print(f"\n[2B/5] [INNO] Compilando instalador oficial com Inno Setup...")
+            compile_with_inno_setup(new_version)
     else:
         print("\n[2/5] [BUILD] Pulando etapa de compilacao (--skip-build).")
 
