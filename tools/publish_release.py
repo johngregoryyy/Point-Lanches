@@ -325,17 +325,39 @@ def publish_via_gh_cli(gh_path: str, owner: str, repo: str, tag_name: str, title
     if not garantir_autenticacao_gh(gh_path, owner, repo):
         return False
 
-    # 2. Executar comando oficial
-    cmd = [
-        gh_path, "release", "create", tag_name,
-        *artifacts,
-        "-R", f"{owner}/{repo}",
-        "--title", title,
-        "--notes", notes
-    ]
-    print(f"\n  [GH] Criando release e enviando binários para {owner}/{repo}...")
-    res = subprocess.run(cmd, cwd=BASE_DIR)
-    return res.returncode == 0
+    # 2. Verificar se a release já existe para atualizar com --clobber
+    check_cmd = [gh_path, "release", "view", tag_name, "-R", f"{owner}/{repo}"]
+    check_res = subprocess.run(check_cmd, cwd=BASE_DIR, capture_output=True, text=True)
+
+    if check_res.returncode == 0:
+        print(f"\n  [GH] Release {tag_name} ja existe no GitHub. Atualizando artefatos...")
+        upload_cmd = [
+            gh_path, "release", "upload", tag_name,
+            *artifacts,
+            "-R", f"{owner}/{repo}",
+            "--clobber"
+        ]
+        up_res = subprocess.run(upload_cmd, cwd=BASE_DIR)
+        edit_cmd = [
+            gh_path, "release", "edit", tag_name,
+            "-R", f"{owner}/{repo}",
+            "--title", title,
+            "--notes", notes
+        ]
+        subprocess.run(edit_cmd, cwd=BASE_DIR)
+        return up_res.returncode == 0
+    else:
+        cmd = [
+            gh_path, "release", "create", tag_name,
+            *artifacts,
+            "-R", f"{owner}/{repo}",
+            "--title", title,
+            "--notes", notes,
+            "--clobber"
+        ]
+        print(f"\n  [GH] Criando release e enviando binarios para {owner}/{repo}...")
+        res = subprocess.run(cmd, cwd=BASE_DIR)
+        return res.returncode == 0
 
 
 def publish_via_rest_api(owner: str, repo: str, tag_name: str, title: str, notes: str, artifacts: list[str], token: str) -> bool:
@@ -471,45 +493,45 @@ def main():
     print("-" * 64 + "\n")
 
     # ETAPA 1: Atualizar version.py
-    print(f"[1/5] 📝 Verificando version.py...")
+    print(f"[1/5] [VERSAO] Verificando version.py...")
     if not update_version_py(new_version):
         sys.exit(1)
 
     # ETAPA 2: Compilação PyInstaller
     if not args.skip_build:
-        print(f"\n[2/5] 🔨 Compilando executável com PyInstaller...")
+        print(f"\n[2/5] [BUILD] Compilando executavel com PyInstaller...")
         if not compile_with_pyinstaller(onefile=args.onefile):
-            print("[ERRO] Falha na compilação do executável com PyInstaller.")
+            print("[ERRO] Falha na compilacao do executavel com PyInstaller.")
             sys.exit(1)
-        print("  [OK] Compilação concluída com sucesso!")
+        print("  [OK] Compilacao concluida com sucesso!")
     else:
-        print("\n[2/5] ⏭ Pulando etapa de compilação (--skip-build).")
+        print("\n[2/5] [BUILD] Pulando etapa de compilacao (--skip-build).")
 
     # ETAPA 3: Verificar e preparar artefatos
-    print(f"\n[3/5] 🔍 Verificando artefatos gerados em dist/...")
+    print(f"\n[3/5] [ARTEFATOS] Verificando artefatos gerados em dist/...")
     artifacts = prepare_release_artifacts(new_version)
     if not artifacts:
-        print("[ERRO] Nenhum executável ou pacote encontrado na pasta dist/.")
+        print("[ERRO] Nenhum executavel ou pacote encontrado na pasta dist/.")
         sys.exit(1)
 
     for art in artifacts:
         sz_mb = os.path.getsize(art) / (1024 * 1024)
-        print(f"  • Artefato pronto: {os.path.basename(art)} ({sz_mb:.2f} MB)")
+        print(f"  * Artefato pronto: {os.path.basename(art)} ({sz_mb:.2f} MB)")
 
     # ETAPA 4: Comandos do Git
     git_path = get_git_path()
     if not args.skip_git and git_path:
-        print(f"\n[4/5] 📦 Criando commit e tag Git ({tag_name})...")
+        print(f"\n[4/5] [GIT] Sincronizando commit e tag ({tag_name})...")
         run_git_steps(git_path, new_version, notes)
     else:
-        print(f"\n[4/5] ⏭ Etapa Git ignorada (não necessária para upload direto via GitHub CLI).")
+        print(f"\n[4/5] [GIT] Etapa Git ignorada.")
 
     # ETAPA 5: Publicar no GitHub
     if args.skip_upload:
-        print("\n[5/5] ⏭ Upload pulado (--skip-upload). Publicação local finalizada!")
+        print("\n[5/5] [UPLOAD] Upload pulado (--skip-upload). Publicacao local finalizada!")
         return
 
-    print(f"\n[5/5] 🚀 Publicando Release oficial em {args.owner}/{args.repo}...")
+    print(f"\n[5/5] [RELEASE] Publicando Release oficial em {args.owner}/{args.repo}...")
     gh_path = get_gh_path()
     token = args.token or carregar_token_salvo()
 
@@ -517,31 +539,30 @@ def main():
 
     # Opção A: GitHub CLI (prioritário)
     if gh_path:
-        print(f"  • Utilizando GitHub CLI ({gh_path})...")
+        print(f"  * Utilizando GitHub CLI ({gh_path})...")
         sucesso = publish_via_gh_cli(gh_path, args.owner, args.repo, tag_name, release_title, notes, artifacts)
 
     # Opção B: Fallback via REST API com Token
     if not sucesso and token:
-        print("  • Utilizando API REST do GitHub com Token...")
+        print("  * Utilizando API REST do GitHub com Token...")
         sucesso = publish_via_rest_api(args.owner, args.repo, tag_name, release_title, notes, artifacts, token)
 
-    # Opção C: Se o usuário não conseguiu autenticar
+    # Opção C: Se a publicação falhou
     if not sucesso:
         print("\n" + "!" * 64)
-        print("⚠ A PUBLICAÇÃO AUTOMÁTICA NÃO FOI CONCLUÍDA")
+        print("[AVISO] A PUBLICACAO AUTOMATICA NAO FOI CONCLUIDA")
         print("!" * 64)
-        print("Motivo: A autorização no GitHub não foi finalizada.")
-        print(f"\nOs arquivos já estão gerados e prontos em:")
+        print("Motivo: A autorizacao ou o envio ao GitHub falhou.")
+        print(f"\nOs arquivos ja estao gerados e prontos em:")
         for art in artifacts:
-            print(f"   📁 {art}")
-        print("\nPara tentar novamente:")
-        print("Execute: publicar.bat e escolha a opção 1 para fazer login pelo navegador.")
+            print(f"   -> {art}")
+        print("\nConsulte o arquivo publicar.log para detalhes.")
         print("!" * 64)
         sys.exit(1)
 
     print("\n" + "=" * 64)
-    print(f"🎉 RELEASE {tag_name} PUBLICADA COM SUCESSO!")
-    print(f"🔗 Link Oficial: https://github.com/{args.owner}/{args.repo}/releases/tag/{tag_name}")
+    print(f"[SUCESSO] RELEASE {tag_name} PUBLICADA COM SUCESSO!")
+    print(f"Link Oficial: https://github.com/{args.owner}/{args.repo}/releases/tag/{tag_name}")
     print("=" * 64)
 
 

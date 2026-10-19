@@ -30,12 +30,25 @@ if %errorlevel% neq 0 (
 if %errorlevel% neq 0 (
     echo.
     color 0C
-    echo [AVISO] O processo finalizou com avisos ou pendencias.
+    echo ================================================================
+    echo      AVISO: O PROCESSO FINALIZOU COM PENDENCIAS OU ERRO
+    echo ================================================================
     echo O log detalhado de toda a operacao foi gravado em:
-    echo   📁 %~dp0publicar.log
+    echo   %~dp0publicar.log
     echo.
+    echo Abrindo o log no Bloco de Notas para conferencia...
+    start notepad.exe "%~dp0publicar.log"
+    echo.
+    echo Pressione qualquer tecla para encerrar esta janela...
+    pause >nul
+    exit /b 1
+) else (
+    echo.
+    color 0A
+    echo ================================================================
+    echo      SUCESSO: RELEASE PUBLICADA COM EXITO NO GITHUB!
+    echo ================================================================
+    echo.
+    echo Pressione qualquer tecla para finalizar...
+    pause >nul
 )
-
-echo.
-echo Pressione qualquer tecla para encerrar...
-pause >nul
