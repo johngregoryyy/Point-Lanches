@@ -189,15 +189,22 @@ As rotinas de impressão ficam em `printer/escpos_printer.py` e `printer/ticket_
 
 ## 7. Banco de Dados SQLite & Persistência PyInstaller
 
-Em `database/db.py`, a função `get_base_dir()` é essencial para evitar perda de dados:
+Em `database/db.py`, a função `get_base_dir()` é essencial para evitar perda de dados e permissões no Windows:
 ```python
 def get_base_dir() -> str:
     if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        if _can_write_to_dir(exe_dir):
+            return exe_dir
+        # Fallback para instalação em C:\Program Files sem privilégios de Admin:
+        app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        point_data = os.path.join(app_data, "Point Lanches")
+        os.makedirs(point_data, exist_ok=True)
+        return point_data
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ```
 > [!IMPORTANT]
-> **Nunca** aponte o banco de dados para `sys._MEIPASS`. O `sys._MEIPASS` é uma pasta temporária do PyInstaller que é destruída ao fechar a aplicação. O banco `point_lanches.db` deve sempre ficar no diretório persistente do executável.
+> **Nunca** aponte o banco de dados para `sys._MEIPASS`. O `sys._MEIPASS` é uma pasta temporária do PyInstaller que é destruída ao fechar a aplicação. O banco `point_lanches.db` deve sempre ficar no diretório do executável (modo portátil) ou em `%LOCALAPPDATA%\Point Lanches` (modo instalado em Program Files).
 
 ### Tabelas Principais:
 - `categorias`: ID, Nome
