@@ -403,8 +403,7 @@ def publish_via_gh_cli(gh_path: str, owner: str, repo: str, tag_name: str, title
             *artifacts,
             "-R", f"{owner}/{repo}",
             "--title", title,
-            "--notes", notes,
-            "--clobber"
+            "--notes", notes
         ]
         print(f"\n  [GH] Criando release e enviando binarios para {owner}/{repo}...")
         res = subprocess.run(cmd, cwd=BASE_DIR)
