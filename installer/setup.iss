@@ -27,12 +27,11 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog commandline
+PrivilegesRequired=admin
+SetupLogging=yes
 
 [Dirs]
 Name: "{app}"; Permissions: users-full
-Name: "{localappdata}\PointLanches\data"; Permissions: users-full
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
