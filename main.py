@@ -137,8 +137,27 @@ class App(ctk.CTk):
                 tela.on_show()
 
     def _abrir_admin(self, tab=None):
-        """Abre a janela administrativa como Toplevel."""
-        admin = ScreenAdmin(self, on_refresh=self._recarregar_dados_sistema, initial_tab=tab)
+        """Abre a janela administrativa com feedback visual imediato (loading animado sem congelar a UI)."""
+        from ui.components.loading import LoadingOverlay
+        if not hasattr(self, "_admin_overlay") or not self._admin_overlay.winfo_exists():
+            self._admin_overlay = LoadingOverlay(self, text="Abrindo Ajustes & Configurações...")
+        self._admin_overlay.show("⚙ Abrindo Ajustes & Configurações...")
+        self.update_idletasks()
+
+        # Agendamento desvinculado (after 50ms) para que o loop do GIF inicie imediatamente
+        self.after(50, lambda: self._executar_abertura_admin(tab))
+
+    def _executar_abertura_admin(self, tab=None):
+        def _ao_concluir_admin():
+            if hasattr(self, "_admin_overlay") and self._admin_overlay.winfo_exists():
+                self._admin_overlay.hide()
+
+        admin = ScreenAdmin(
+            self,
+            on_refresh=self._recarregar_dados_sistema,
+            initial_tab=tab,
+            on_ready=_ao_concluir_admin
+        )
         admin.focus()
 
     def _abrir_balanco(self):

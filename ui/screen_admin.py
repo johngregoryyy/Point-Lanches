@@ -6,12 +6,13 @@ from database.db import (
     listar_categorias, listar_produtos,
     adicionar_produto, atualizar_produto,
     remover_produto, adicionar_categoria,
+    atualizar_categoria, contar_produtos_por_categoria, remover_categoria,
     listar_adicionais, adicionar_adicional, atualizar_adicional,
     listar_taxas, adicionar_taxa, atualizar_taxa, remover_taxa,
     get_config, set_config,
     listar_observacoes_padrao, adicionar_observacao_padrao,
     atualizar_observacao_padrao, remover_observacao_padrao,
-    exportar_dados_json, importar_dados_json
+    exportar_dados_json, importar_dados_json, get_categoria_por_nome
 )
 from printer.escpos_printer import (
     test_connection_network, test_connection_usb,
@@ -40,10 +41,11 @@ class ScreenAdmin(ctk.CTkToplevel):
     - Aba 5: Configuração da Impressora Elgin i8 (Rede TCP 9100 e Cabo USB)
     """
 
-    def __init__(self, parent, on_refresh=None, initial_tab=None, **kwargs):
+    def __init__(self, parent, on_refresh=None, initial_tab=None, on_ready=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.title("⚙  Configurações & Painel Administrativo")
         self._on_refresh = on_refresh
+        self._on_ready = on_ready
 
         self.update_idletasks()
         sw = self.winfo_screenwidth()
@@ -65,6 +67,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         self.geometry(f"+{px}+{py}")
 
         self._produto_selecionado = None
+        self._cat_selecionada = None
         self._adicional_selecionado = None
         self._taxa_selecionada = None
         self._obs_selecionada = None
@@ -147,12 +150,14 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._tabs.pack(fill="both", expand=True, padx=14, pady=(8, 14))
 
         self._tabs.add("🍔  Cardápio")
+        self._tabs.add("📂  Categorias")
         self._tabs.add("🧀  Adicionais")
         self._tabs.add("🛵  Taxas de Tele")
         self._tabs.add("📝  Obs. Rápidas")
         self._tabs.add("🖨  Impressora")
 
         self._build_tab_cardapio(self._tabs.tab("🍔  Cardápio"))
+        self._build_tab_categorias(self._tabs.tab("📂  Categorias"))
         self._build_tab_adicionais(self._tabs.tab("🧀  Adicionais"))
         self._build_tab_taxas(self._tabs.tab("🛵  Taxas de Tele"))
         self._build_tab_observacoes(self._tabs.tab("📝  Obs. Rápidas"))
@@ -204,13 +209,20 @@ class ScreenAdmin(ctk.CTkToplevel):
         if hasattr(self, "_overlay") and self.winfo_exists():
             self._overlay.hide()
             try:
-                self._carregar_tabela()
+                self._carregar_produtos()
+                if hasattr(self, "_carregar_categorias_tab"):
+                    self._carregar_categorias_tab()
                 self._carregar_adicionais()
                 self._carregar_taxas()
                 if hasattr(self, "_carregar_obs"):
                     self._carregar_obs()
-                if hasattr(self, "_carregar_config_impressora"):
-                    self._carregar_config_impressora()
+                if hasattr(self, "_carregar_config"):
+                    self._carregar_config()
+            except Exception:
+                pass
+        if hasattr(self, "_on_ready") and callable(self._on_ready):
+            try:
+                self._on_ready()
             except Exception:
                 pass
 
@@ -226,6 +238,11 @@ class ScreenAdmin(ctk.CTkToplevel):
         if hasattr(self, "_overlay"):
             try:
                 self._overlay.destroy()
+            except Exception:
+                pass
+        if hasattr(self, "_on_ready") and callable(self._on_ready):
+            try:
+                self._on_ready()
             except Exception:
                 pass
         super().destroy()
@@ -294,7 +311,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._status_lbl = ctk.CTkLabel(form, text="", font=ctk.CTkFont(size=12), wraplength=280)
         self._status_lbl.pack(padx=14)
 
-        self._carregar_produtos()
+        # População dos produtos diferida para _finalizar_carregamento_ajustes
 
     def _carregar_produtos(self):
         for w in self._tabela_scroll.winfo_children():
@@ -316,8 +333,13 @@ class ScreenAdmin(ctk.CTkToplevel):
 
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
             btn_frame.grid(row=0, column=3, padx=4, sticky="e")
-            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda p=prod: self._editar_produto(p)).pack(side="left", padx=2)
-            ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda p=prod: self._confirmar_remocao(p)).pack(side="left", padx=2)
+            btn_edit = ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda p=prod: self._editar_produto(p))
+            btn_edit.pack(side="left", padx=2)
+            habilitar_feedback_clique(btn_edit, cor_flash="#666666")
+
+            btn_del = ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda p=prod: self._confirmar_remocao(p))
+            btn_del.pack(side="left", padx=2)
+            habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
 
     def _editar_produto(self, prod: dict):
         self._produto_selecionado = prod
@@ -366,11 +388,25 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         self._limpar_form()
         self._carregar_produtos()
-        self._f_cat.configure(values=[c["nome"] for c in listar_categorias()])
+        self._atualizar_combobox_categorias()
+        if hasattr(self, "_carregar_categorias_tab"):
+            self._carregar_categorias_tab()
+        if self._on_refresh:
+            try:
+                self._on_refresh()
+            except Exception:
+                pass
 
     def _confirmar_remocao(self, prod: dict):
         remover_produto(prod["id"])
         self._carregar_produtos()
+        if hasattr(self, "_carregar_categorias_tab"):
+            self._carregar_categorias_tab()
+        if self._on_refresh:
+            try:
+                self._on_refresh()
+            except Exception:
+                pass
 
     def _limpar_form(self):
         self._produto_selecionado = None
@@ -379,6 +415,239 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._f_preco.delete(0, "end")
         self._f_nova_cat.delete(0, "end")
         self._status_lbl.configure(text="")
+
+    # ── ABA 1B: GESTÃO DEDICADA DE CATEGORIAS (CRUD COMPLETO) ─────────────────
+
+    def _build_tab_categorias(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=0)
+        tab.rowconfigure(0, weight=1)
+
+        tabela_frame = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        tabela_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        tabela_frame.rowconfigure(1, weight=1)
+        tabela_frame.columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        header.columnconfigure(1, weight=2)
+        header.columnconfigure(2, weight=1)
+        header.columnconfigure(3, weight=1)
+
+        for col, txt in enumerate(["Ordem", "Nome da Categoria", "Produtos Vinculados", "Ações"]):
+            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+
+        self._cat_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
+        self._cat_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self._cat_scroll.columnconfigure(0, weight=1)
+        self._cat_scroll.columnconfigure(1, weight=2)
+        self._cat_scroll.columnconfigure(2, weight=1)
+        self._cat_scroll.columnconfigure(3, weight=1)
+
+        # Form lateral categorias
+        form_cat = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
+        form_cat.grid(row=0, column=1, sticky="nsew")
+        form_cat.pack_propagate(False)
+
+        ctk.CTkLabel(form_cat, text="GERENCIAR CATEGORIA", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+
+        ctk.CTkLabel(form_cat, text="Nome da Categoria", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._cat_nome = ctk.CTkEntry(form_cat, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Lanches, Bebidas...")
+        self._cat_nome.pack(fill="x", padx=14, pady=(2, 8))
+
+        ctk.CTkLabel(form_cat, text="Ordem de Exibição", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._cat_ordem = ctk.CTkEntry(form_cat, height=36, font=ctk.CTkFont(size=13), placeholder_text="0 (Prioridade na fila)")
+        self._cat_ordem.pack(fill="x", padx=14, pady=(2, 14))
+
+        btn_salvar_cat = ctk.CTkButton(
+            form_cat, text="💾  Salvar Categoria", height=40,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8,
+            command=self._salvar_categoria
+        )
+        btn_salvar_cat.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_salvar_cat, cor_flash="#10B981")
+
+        btn_limpar_cat = ctk.CTkButton(
+            form_cat, text="➕  Nova / Limpar", height=36,
+            font=ctk.CTkFont(size=12),
+            fg_color="#444", hover_color="#555", corner_radius=8,
+            command=self._limpar_categoria
+        )
+        btn_limpar_cat.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_limpar_cat, cor_flash="#666666")
+
+        self._cat_status_lbl = ctk.CTkLabel(form_cat, text="", font=ctk.CTkFont(size=12), wraplength=280)
+        self._cat_status_lbl.pack(padx=14)
+
+        # Dica explicativa
+        ctk.CTkLabel(
+            form_cat,
+            text="💡 A ordem numérica define a posição\n"
+                 "    no cardápio (0 aparece primeiro).\n"
+                 "    Categorias com produtos vinculados\n"
+                 "    possuem proteção contra exclusão.",
+            font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
+        ).pack(anchor="w", padx=14, pady=(16, 0))
+
+    def _carregar_categorias_tab(self):
+        if not hasattr(self, "_cat_scroll") or not self._cat_scroll.winfo_exists():
+            return
+        for w in self._cat_scroll.winfo_children():
+            w.destroy()
+
+        categorias = listar_categorias(incluir_extras=True)
+        for i, cat in enumerate(categorias):
+            bg = "#272727" if i % 2 == 0 else "#222222"
+            row = ctk.CTkFrame(self._cat_scroll, fg_color=bg, corner_radius=6, height=38)
+            row.pack(fill="x", pady=2, padx=2)
+            row.columnconfigure(0, weight=1)
+            row.columnconfigure(1, weight=2)
+            row.columnconfigure(2, weight=1)
+            row.columnconfigure(3, weight=1)
+
+            ordem_val = cat.get("ordem", 0)
+            ctk.CTkLabel(row, text=f"#{ordem_val}", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_AZUL_POINT, anchor="w").grid(row=0, column=0, padx=8, sticky="w")
+            ctk.CTkLabel(row, text=cat["nome"], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+
+            qtd_prods = contar_produtos_por_categoria(cat["id"])
+            cor_qtd = COR_VERDE if qtd_prods > 0 else COR_TEXTO_SUAVE
+            txt_qtd = f"{qtd_prods} produto(s)" if qtd_prods > 0 else "Nenhum produto"
+            ctk.CTkLabel(row, text=txt_qtd, font=ctk.CTkFont(size=11), text_color=cor_qtd, anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
+
+            btn_edit = ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda c=cat: self._editar_categoria(c))
+            btn_edit.pack(side="left", padx=2)
+            habilitar_feedback_clique(btn_edit, cor_flash="#666666")
+
+            btn_del = ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda c=cat: self._tentar_excluir_categoria(c))
+            btn_del.pack(side="left", padx=2)
+            habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
+
+    def _editar_categoria(self, cat: dict):
+        self._cat_selecionada = cat
+        self._cat_nome.delete(0, "end")
+        self._cat_nome.insert(0, cat["nome"])
+        self._cat_ordem.delete(0, "end")
+        self._cat_ordem.insert(0, str(cat.get("ordem", 0)))
+        self._cat_status_lbl.configure(text=f"Editando: {cat['nome']}", text_color=COR_AZUL_POINT)
+
+    def _salvar_categoria(self):
+        nome = self._cat_nome.get().strip()
+        ordem_str = self._cat_ordem.get().strip()
+
+        if not nome:
+            self._cat_status_lbl.configure(text="⚠ Nome da categoria é obrigatório!", text_color=COR_VERMELHO)
+            return
+
+        try:
+            ordem = int(ordem_str) if ordem_str else 0
+        except ValueError:
+            ordem = 0
+
+        if self._cat_selecionada:
+            atualizar_categoria(self._cat_selecionada["id"], nome, ordem)
+            self._cat_status_lbl.configure(text=f"✅ '{nome}' atualizada com sucesso!", text_color=COR_VERDE)
+        else:
+            adicionar_categoria(nome, ordem)
+            self._cat_status_lbl.configure(text=f"✅ '{nome}' adicionada com sucesso!", text_color=COR_VERDE)
+
+        self._limpar_categoria()
+        self._carregar_categorias_tab()
+        self._atualizar_combobox_categorias()
+        if self._on_refresh:
+            try:
+                self._on_refresh()
+            except Exception:
+                pass
+
+    def _limpar_categoria(self):
+        self._cat_selecionada = None
+        self._cat_nome.delete(0, "end")
+        self._cat_ordem.delete(0, "end")
+        self._cat_status_lbl.configure(text="")
+
+    def _atualizar_combobox_categorias(self):
+        if hasattr(self, "_f_cat"):
+            cats = [c["nome"] for c in listar_categorias()]
+            self._f_cat.configure(values=cats)
+            if self._f_cat_var.get() not in cats and cats:
+                self._f_cat_var.set(cats[0])
+
+    def _tentar_excluir_categoria(self, cat: dict):
+        cat_id = cat.get("id")
+        nome = cat.get("nome", "")
+        # Validação de integridade relacional
+        qtd = contar_produtos_por_categoria(cat_id)
+        if qtd > 0:
+            self._mostrar_alerta(
+                "Exclusão Bloqueada",
+                f"Não é possível excluir a categoria '{nome}'!\n\nExistem {qtd} produto(s) vinculado(s) a esta categoria.\n\nMova ou exclua os produtos vinculados antes de remover a categoria.",
+                icone="🚫"
+            )
+            return
+
+        def _realizar_exclusao():
+            remover_categoria(cat_id)
+            self._limpar_categoria()
+            self._carregar_categorias_tab()
+            self._atualizar_combobox_categorias()
+            if self._on_refresh:
+                try:
+                    self._on_refresh()
+                except Exception:
+                    pass
+
+        self._confirmar_dialogo(
+            "Confirmar Exclusão",
+            f"Deseja realmente excluir a categoria '{nome}'?\n\nEsta ação removerá a categoria do sistema.",
+            _realizar_exclusao,
+            icone="🗑"
+        )
+
+    def _confirmar_dialogo(self, titulo: str, mensagem: str, on_confirmar, icone: str = "⚠️"):
+        win = ctk.CTkToplevel(self)
+        win.title(titulo)
+        win.geometry("440x230")
+        win.grab_set()
+        win.resizable(False, False)
+
+        win.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width() - 440) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - 230) // 2
+        win.geometry(f"+{max(0, px)}+{max(0, py)}")
+
+        ctk.CTkLabel(win, text=icone, font=ctk.CTkFont(size=40)).pack(pady=(14, 2))
+        ctk.CTkLabel(win, text=titulo, font=ctk.CTkFont(size=15, weight="bold")).pack(pady=(2, 6))
+        ctk.CTkLabel(win, text=mensagem, font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE, wraplength=400, justify="center").pack(padx=20, pady=(0, 14))
+
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(pady=(0, 14))
+
+        def _exec():
+            win.destroy()
+            on_confirmar()
+
+        btn_cancel = ctk.CTkButton(
+            btns, text="Cancelar", width=110, height=36,
+            font=ctk.CTkFont(size=12),
+            fg_color="#444", hover_color="#555",
+            corner_radius=8, command=win.destroy
+        )
+        btn_cancel.pack(side="left", padx=6)
+        habilitar_feedback_clique(btn_cancel, cor_flash="#666666")
+
+        btn_sim = ctk.CTkButton(
+            btns, text="Sim, Excluir", width=120, height=36,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR,
+            corner_radius=8, command=_exec
+        )
+        btn_sim.pack(side="left", padx=6)
+        habilitar_feedback_clique(btn_sim, cor_flash="#DC2626")
 
     # ── ABA 2: ADICIONAIS / EXTRAS ───────────────────────────────────────────
 
@@ -430,7 +699,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._ad_status_lbl = ctk.CTkLabel(form_ad, text="", font=ctk.CTkFont(size=12), wraplength=280)
         self._ad_status_lbl.pack(padx=14)
 
-        self._carregar_adicionais()
+        # População dos adicionais diferida para _finalizar_carregamento_ajustes
 
     def _carregar_adicionais(self):
         for w in self._adicionais_scroll.winfo_children():
@@ -557,7 +826,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._tx_status_lbl = ctk.CTkLabel(form_tx, text="", font=ctk.CTkFont(size=12), wraplength=280)
         self._tx_status_lbl.pack(padx=14)
 
-        self._carregar_taxas()
+        # População das taxas diferida para _finalizar_carregamento_ajustes
 
     def _carregar_taxas(self):
         for w in self._taxas_scroll.winfo_children():
@@ -684,7 +953,7 @@ class ScreenAdmin(ctk.CTkToplevel):
             font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
         ).pack(anchor="w", padx=14, pady=(20, 0))
 
-        self._carregar_obs()
+        # População das observações diferida para _finalizar_carregamento_ajustes
 
     def _carregar_obs(self):
         for w in self._obs_scroll.winfo_children():
@@ -1077,6 +1346,9 @@ class ScreenAdmin(ctk.CTkToplevel):
             if sucesso:
                 # Recarregar abas do Admin em tempo real
                 self._carregar_produtos()
+                if hasattr(self, "_carregar_categorias_tab"):
+                    self._carregar_categorias_tab()
+                self._atualizar_combobox_categorias()
                 self._carregar_adicionais()
                 self._carregar_taxas()
                 if hasattr(self, "_carregar_obs"):

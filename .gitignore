@@ -5,6 +5,8 @@ build/
 dist/
 *.spec.bak
 *.db
+*.db-shm
+*.db-wal
 *.log
 publicar.log
 .github_token

@@ -206,6 +206,7 @@ def init_db():
         # Migrações seguras (ignoram erro se coluna já existe)
         for sql in [
             "ALTER TABLE itens_pedido ADD COLUMN categoria TEXT DEFAULT ''",
+            "ALTER TABLE categorias ADD COLUMN ordem INTEGER DEFAULT 0",
         ]:
             try:
                 conn.execute(sql)
@@ -213,14 +214,14 @@ def init_db():
                 pass
 
 
-# ── Produtos ──────────────────────────────────────────────────────────────────
+# ── Produtos e Categorias ─────────────────────────────────────────────────────
 
 def listar_categorias(incluir_extras=False):
     with get_connection() as conn:
         q = "SELECT * FROM categorias"
         if not incluir_extras:
             q += " WHERE LOWER(nome) != 'extras'"
-        q += " ORDER BY id"
+        q += " ORDER BY ordem, id"
         return [dict(r) for r in conn.execute(q).fetchall()]
 
 
@@ -263,9 +264,37 @@ def remover_produto(produto_id):
         conn.execute("UPDATE produtos SET ativo=0 WHERE id=?", (produto_id,))
 
 
-def adicionar_categoria(nome):
+def adicionar_categoria(nome, ordem=0):
     with get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO categorias (nome) VALUES (?)", (nome,))
+        conn.execute("INSERT OR IGNORE INTO categorias (nome, ordem) VALUES (?, ?)", (nome, ordem))
+
+
+def atualizar_categoria(categoria_id, novo_nome, nova_ordem=None):
+    with get_connection() as conn:
+        if nova_ordem is not None:
+            conn.execute(
+                "UPDATE categorias SET nome=?, ordem=? WHERE id=?",
+                (novo_nome, nova_ordem, categoria_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE categorias SET nome=? WHERE id=?",
+                (novo_nome, categoria_id)
+            )
+
+
+def contar_produtos_por_categoria(categoria_id: int, apenas_ativos: bool = False) -> int:
+    with get_connection() as conn:
+        q = "SELECT COUNT(*) FROM produtos WHERE categoria_id=?"
+        if apenas_ativos:
+            q += " AND ativo=1"
+        row = conn.execute(q, (categoria_id,)).fetchone()
+        return row[0] if row else 0
+
+
+def remover_categoria(categoria_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM categorias WHERE id=?", (categoria_id,))
 
 
 def get_categoria_por_nome(nome):
