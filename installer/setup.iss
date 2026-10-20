@@ -2,7 +2,7 @@
 ; =============================================================================
 
 #define MyAppName "Point Lanches"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Point Lanches"
 #define MyAppURL "https://github.com/johngregoryyy/Point-Lanches"
 #define MyAppExeName "PointLanches.exe"
@@ -42,8 +42,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; Todos os arquivos da distribuição onedir gerada pelo PyInstaller
 Source: "dist\PointLanches\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Garantir a presença do ícone no diretório instalado
-Source: "assets\images.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+; Garantir a presença de todos os assets (ícone, loading gif, etc.) no diretório instalado
+Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"

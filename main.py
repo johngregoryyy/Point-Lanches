@@ -29,9 +29,12 @@ class App(ctk.CTk):
     Gerencia o estado compartilhado entre telas e a alternância entre elas.
     """
 
-    def __init__(self):
+    def __init__(self, start_hidden: bool = False):
         super().__init__()
         self.title(TITULO_APP)
+
+        if start_hidden:
+            self.withdraw()
 
         # ── Ícone oficial da aplicação ──
         try:
@@ -61,23 +64,26 @@ class App(ctk.CTk):
         y = max(0, (sh - altura) // 2)
         self.geometry(f"+{x}+{y}")
 
-        # Em telas HD (1366x768 ou 1280x720), abre maximizado para aproveitar 100% da área útil do caixa
-        if sh <= 800:
-            self.after(100, lambda: self.state("zoomed"))
-
         # ── Estado compartilhado (fluxo do pedido) ────────────────────────────
         self._state: dict = {}
         self._reset_state()
+        self._telas: dict[str, ctk.CTkFrame] = {}
 
-        # ── Container principal (frame que empilha as telas) ──────────────────
+        if not start_hidden:
+            self.setup_ui()
+            self.mostrar_janela_principal()
+
+    def setup_ui(self):
+        """Constrói o container principal e instancia todas as telas do sistema."""
+        if self._telas:
+            return
+
         container = ctk.CTkFrame(self, fg_color="transparent")
         container.pack(fill="both", expand=True)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
         # ── Instanciar as telas ───────────────────────────────────────────────
-        self._telas: dict[str, ctk.CTkFrame] = {}
-
         self._telas["cart"] = ScreenCart(
             container, state=self._state,
             on_next=lambda: self._mostrar("delivery"),
@@ -112,6 +118,13 @@ class App(ctk.CTk):
         # Checagem não-bloqueante de atualização via GitHub Releases (2s após carregar a UI)
         if CHECK_UPDATES_ON_STARTUP:
             self.after(2000, lambda: check_updates_background(self))
+
+    def mostrar_janela_principal(self):
+        """Torna a janela visível e aplica zoom em telas HD."""
+        self.deiconify()
+        sh = self.winfo_screenheight()
+        if sh <= 800:
+            self.after(100, lambda: self.state("zoomed"))
 
     # ── Navegação ─────────────────────────────────────────────────────────────
 
@@ -176,12 +189,28 @@ class App(ctk.CTk):
 # ── Ponto de entrada ──────────────────────────────────────────────────────────
 
 def main():
-    # 1. Inicializar banco de dados e migrações
+    # 1. Instanciar aplicação com janela temporariamente oculta
+    app = App(start_hidden=True)
+
+    # 2. Exibir imediatamente a Splash Screen animada
+    from ui.components.loading import SplashScreen
+    splash = SplashScreen(app, status="Inicializando banco de dados SQLite...")
+
+    # 3. Inicializar banco e migrações
+    splash.update_status("Verificando tabelas e migrações...")
     init_db()
-    # 2. Popular todas as tabelas (cardápio, bebidas, adicionais, taxas)
+
+    # 4. Popular cardápio, taxas e configurações
+    splash.update_status("Carregando cardápio e configurações...")
     run_all_seeds()
-    # 3. Iniciar aplicação
-    app = App()
+
+    # 5. Montar telas e componentes do PDV
+    splash.update_status("Carregando catálogo e telas do PDV...")
+    app.setup_ui()
+
+    # 6. Transição suave: fechar splash e exibir tela principal
+    splash.update_status("Pronto! Abrindo Point Lanches...")
+    app.after(350, lambda: (splash.close(), app.mostrar_janela_principal()))
     app.mainloop()
 
 

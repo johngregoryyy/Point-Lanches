@@ -135,6 +135,10 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._build_tab_observacoes(self._tabs.tab("📝  Obs. Rápidas"))
         self._build_tab_impressora(self._tabs.tab("🖨  Impressora"))
 
+        # Overlay de carregamento para operações assíncronas (Backup / Importação / Atualizações)
+        from ui.components.loading import LoadingOverlay
+        self._overlay = LoadingOverlay(self, text="Carregando...")
+
     # ── ABA 1: CARDÁPIO ───────────────────────────────────────────────────────
 
     def _build_tab_cardapio(self, tab):
@@ -927,7 +931,6 @@ class ScreenAdmin(ctk.CTkToplevel):
     def _exportar_backup_json(self):
         from tkinter import filedialog
         from datetime import datetime
-        import json
 
         data_s = datetime.now().strftime("%Y%m%d_%H%M%S")
         sugestao_nome = f"point_lanches_backup_{data_s}.json"
@@ -942,18 +945,24 @@ class ScreenAdmin(ctk.CTkToplevel):
         if not caminho:
             return
 
+        self._overlay.show("Exportando dados de backup...")
+        self.after(60, lambda: self._executar_exportacao_backup(caminho))
+
+    def _executar_exportacao_backup(self, caminho):
+        import json
         try:
             dados = exportar_dados_json()
             with open(caminho, "w", encoding="utf-8") as f:
                 json.dump(dados, f, ensure_ascii=False, indent=2)
 
+            self._overlay.hide()
             self._mostrar_alerta("Backup Exportado!", f"Configurações exportadas com sucesso para:\n{caminho}", icone="✅")
         except Exception as e:
+            self._overlay.hide()
             self._mostrar_alerta("Erro na Exportação", f"Não foi possível salvar o arquivo de backup:\n{str(e)}", icone="❌")
 
     def _importar_backup_json(self):
         from tkinter import filedialog
-        import json
 
         caminho = filedialog.askopenfilename(
             parent=self,
@@ -963,11 +972,17 @@ class ScreenAdmin(ctk.CTkToplevel):
         if not caminho:
             return
 
+        self._overlay.show("Processando importação de configurações...")
+        self.after(60, lambda: self._executar_importacao_backup(caminho))
+
+    def _executar_importacao_backup(self, caminho):
+        import json
         try:
             with open(caminho, "r", encoding="utf-8") as f:
                 dados = json.load(f)
 
             sucesso, msg = importar_dados_json(dados)
+            self._overlay.hide()
             if sucesso:
                 # Recarregar abas do Admin em tempo real
                 self._carregar_produtos()
@@ -990,6 +1005,7 @@ class ScreenAdmin(ctk.CTkToplevel):
             else:
                 self._mostrar_alerta("Falha na Validação", msg, icone="⚠️")
         except Exception as e:
+            self._overlay.hide()
             self._mostrar_alerta("Arquivo Inválido", f"Erro ao processar o arquivo JSON:\n{str(e)}", icone="❌")
 
     def _mostrar_alerta(self, titulo: str, mensagem: str, icone: str = "ℹ️"):
@@ -1018,9 +1034,14 @@ class ScreenAdmin(ctk.CTkToplevel):
     def _verificar_atualizacoes_manual(self):
         """Dispara verificação de atualizações com feedback explícito."""
         import threading
-        t = threading.Thread(
-            target=lambda: check_for_updates(self, silent_if_uptodate=False),
-            daemon=True
-        )
+        self._overlay.show("Verificando atualizações no GitHub...")
+
+        def _worker():
+            try:
+                check_for_updates(self, silent_if_uptodate=False)
+            finally:
+                self.after(0, self._overlay.hide)
+
+        t = threading.Thread(target=_worker, daemon=True)
         t.start()
 

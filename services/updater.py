@@ -124,13 +124,22 @@ class UpdateDialog(ctk.CTkToplevel):
         # Visão 2: Barra de Progresso do Download (inicialmente oculta)
         self._download_view = ctk.CTkFrame(self._content_frame, fg_color="transparent")
 
+        from ui.components.loading import AnimatedGif
+        self._download_gif = AnimatedGif(
+            self._download_view,
+            size=(170, 96),
+            bg_color="transparent",
+            autoplay=True
+        )
+        self._download_gif.pack(pady=(12, 4))
+
         self._download_status_lbl = ctk.CTkLabel(
             self._download_view,
             text="Preparando download da atualização...",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color=COR_AZUL_POINT
         )
-        self._download_status_lbl.pack(pady=(30, 10))
+        self._download_status_lbl.pack(pady=(4, 10))
 
         self._progress_bar = ctk.CTkProgressBar(
             self._download_view,
@@ -269,18 +278,24 @@ class UpdateDialog(ctk.CTkToplevel):
                             self._progress_detail_lbl.configure(text=f"{pct}% ({md:.1f} MB / {mt:.1f} MB)")
                         ))
 
-            self.after(0, lambda: self._download_status_lbl.configure(
-                text="✅ Download concluído! Reiniciando sistema...",
-                text_color=COR_VERDE
+            self.after(0, lambda: (
+                self._download_gif.stop() if hasattr(self, '_download_gif') else None,
+                self._download_status_lbl.configure(
+                    text="✅ Download concluído! Reiniciando sistema...",
+                    text_color=COR_VERDE
+                )
             ))
             time.sleep(1)
 
         except Exception as exc:
-            self.after(0, lambda e=exc: self._download_status_lbl.configure(
-                text=f"❌ Erro ao baixar atualização: {str(e)[:45]}",
-                text_color=COR_VERMELHO
+            self.after(0, lambda e=exc: (
+                self._download_gif.stop() if hasattr(self, '_download_gif') else None,
+                self._download_status_lbl.configure(
+                    text=f"❌ Erro ao baixar atualização: {str(e)[:45]}",
+                    text_color=COR_VERMELHO
+                ),
+                self._btn_depois.configure(state="normal", text="Fechar")
             ))
-            self.after(0, lambda: self._btn_depois.configure(state="normal", text="Fechar"))
             return
 
         # 4. Executar script Batch de substituição silenciosa e reiniciar

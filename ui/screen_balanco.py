@@ -243,159 +243,173 @@ class ScreenBalanco(ctk.CTkToplevel):
             command=self.destroy
         ).pack(side="right", padx=16, pady=7)
 
+        from ui.components.loading import LoadingOverlay
+        self._overlay = LoadingOverlay(self, text="Consolidando dados financeiros...")
+
         # Carga inicial dos dados
         self._atualizar_balanco()
 
     def _atualizar_balanco(self):
-        mes_str = self._mes_var.get()
-        ano_str = self._ano_var.get()
+        if hasattr(self, "_overlay"):
+            self._overlay.show("Consolidando balanço financeiro...")
+            self.after(50, self._executar_atualizacao_balanco)
+        else:
+            self._executar_atualizacao_balanco()
+
+    def _executar_atualizacao_balanco(self):
         try:
-            mes = int(mes_str.split(" - ")[0])
-            ano = int(ano_str)
-        except Exception:
-            now = datetime.now()
-            mes = now.month
-            ano = now.year
+            mes_str = self._mes_var.get()
+            ano_str = self._ano_var.get()
+            try:
+                mes = int(mes_str.split(" - ")[0])
+                ano = int(ano_str)
+            except Exception:
+                now = datetime.now()
+                mes = now.month
+                ano = now.year
 
-        self._dados_atuais = calcular_balanco_mensal(mes, ano)
-        dados = self._dados_atuais
+            self._dados_atuais = calcular_balanco_mensal(mes, ano)
+            dados = self._dados_atuais
 
-        fat = dados["faturamento_total"]
-        qtd = dados["total_pedidos"]
-        tax = dados["total_taxas"]
-        tm = dados["ticket_medio"]
-        custo = dados["custo_insumos"]
-        lucro = dados["lucro_bruto"]
+            fat = dados["faturamento_total"]
+            qtd = dados["total_pedidos"]
+            tax = dados["total_taxas"]
+            tm = dados["ticket_medio"]
+            custo = dados["custo_insumos"]
+            lucro = dados["lucro_bruto"]
 
-        fat_fmt = f"R$ {fat:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        tax_fmt = f"R$ {tax:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        tm_fmt = f"R$ {tm:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        custo_fmt = f"R$ {custo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        lucro_fmt = f"R$ {lucro:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            fat_fmt = f"R$ {fat:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            tax_fmt = f"R$ {tax:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            tm_fmt = f"R$ {tm:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            custo_fmt = f"R$ {custo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            lucro_fmt = f"R$ {lucro:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        self._lbl_fat_total.configure(text=fat_fmt)
-        self._lbl_qtd_pedidos.configure(text=f"{qtd} pedidos")
-        self._lbl_taxas_total.configure(text=tax_fmt)
-        self._lbl_ticket_medio.configure(text=tm_fmt)
-        self._lbl_lucro_bruto.configure(
-            text=f"💰  Lucro Bruto Estimado: {lucro_fmt}   │   Custos de Insumos: {custo_fmt} (Módulo preparado no SQLite)"
-        )
-
-        # ── Renderizar Gráfico Visual de Barras ──
-        for w in self._chart_container.winfo_children():
-            w.destroy()
-
-        ordem_mod = ["PIX", "Dinheiro", "Cartão de Débito", "Cartão de Crédito", "Outros"]
-        config_visual = {
-            "PIX":              {"icone": "📱", "cor": "#10B981"},  # Verde esmeralda
-            "Dinheiro":         {"icone": "💵", "cor": "#0284C7"},  # Azul Point Primário
-            "Cartão de Débito": {"icone": "💳", "cor": "#38BDF8"},  # Azul celeste
-            "Cartão de Crédito":{"icone": "💳", "cor": "#818CF8"},  # Roxo / Índigo
-            "Outros":           {"icone": "🧾", "cor": "#94A3B8"},  # Cinza ardósia
-        }
-
-        for k in ordem_mod:
-            item = dados["modalidades"].get(k, {"total": 0.0, "qtd": 0})
-            if k == "Outros" and item["qtd"] == 0:
-                continue
-
-            part = (item["total"] / fat * 100) if fat > 0 else 0.0
-            prop = (item["total"] / fat) if fat > 0 else 0.0
-            conf = config_visual.get(k, {"icone": "💳", "cor": COR_PRIMARIA})
-
-            row_chart = ctk.CTkFrame(self._chart_container, fg_color="transparent", height=32)
-            row_chart.pack(fill="x", pady=4)
-            row_chart.pack_propagate(False)
-
-            # Rótulo Modalidade
-            ctk.CTkLabel(
-                row_chart,
-                text=f"{conf['icone']}  {k}",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                width=150, anchor="w"
-            ).pack(side="left", padx=(4, 8))
-
-            # Barra de Progresso / Proporção
-            bar = ctk.CTkProgressBar(
-                row_chart,
-                height=16,
-                corner_radius=8,
-                fg_color="#262D3D",
-                progress_color=conf["cor"]
+            self._lbl_fat_total.configure(text=fat_fmt)
+            self._lbl_qtd_pedidos.configure(text=f"{qtd} pedidos")
+            self._lbl_taxas_total.configure(text=tax_fmt)
+            self._lbl_ticket_medio.configure(text=tm_fmt)
+            self._lbl_lucro_bruto.configure(
+                text=f"💰  Lucro Bruto Estimado: {lucro_fmt}   │   Custos de Insumos: {custo_fmt} (Módulo preparado no SQLite)"
             )
-            bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
-            bar.set(prop)
 
-            # Porcentagem
-            ctk.CTkLabel(
-                row_chart,
-                text=f"{part:5.1f} %",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=conf["cor"] if part > 0 else COR_TEXTO_SUAVE,
-                width=65, anchor="e"
-            ).pack(side="left", padx=4)
+            # ── Renderizar Gráfico Visual de Barras ──
+            for w in self._chart_container.winfo_children():
+                w.destroy()
 
-            # Valor Total R$
-            val_fmt = f"R$ {item['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            ctk.CTkLabel(
-                row_chart,
-                text=val_fmt,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=COR_TEXTO,
-                width=110, anchor="e"
-            ).pack(side="left", padx=4)
+            ordem_mod = ["PIX", "Dinheiro", "Cartão de Débito", "Cartão de Crédito", "Outros"]
+            config_visual = {
+                "PIX":              {"icone": "📱", "cor": "#10B981"},  # Verde esmeralda
+                "Dinheiro":         {"icone": "💵", "cor": "#0284C7"},  # Azul Point Primário
+                "Cartão de Débito": {"icone": "💳", "cor": "#38BDF8"},  # Azul celeste
+                "Cartão de Crédito":{"icone": "💳", "cor": "#818CF8"},  # Roxo / Índigo
+                "Outros":           {"icone": "🧾", "cor": "#94A3B8"},  # Cinza ardósia
+            }
 
-            # Quantidade de Pedidos
-            ctk.CTkLabel(
-                row_chart,
-                text=f"({item['qtd']} ped.)",
-                font=ctk.CTkFont(size=11),
-                text_color=COR_TEXTO_SUAVE,
-                width=75, anchor="e"
-            ).pack(side="left", padx=(4, 0))
+            for k in ordem_mod:
+                item = dados["modalidades"].get(k, {"total": 0.0, "qtd": 0})
+                if k == "Outros" and item["qtd"] == 0:
+                    continue
 
-        # ── Renderizar Linhas da Tabela ──
-        for w in self._table_rows_frame.winfo_children():
-            w.destroy()
+                part = (item["total"] / fat * 100) if fat > 0 else 0.0
+                prop = (item["total"] / fat) if fat > 0 else 0.0
+                conf = config_visual.get(k, {"icone": "💳", "cor": COR_PRIMARIA})
 
-        for idx, k in enumerate(ordem_mod):
-            item = dados["modalidades"].get(k, {"total": 0.0, "qtd": 0})
-            if k == "Outros" and item["qtd"] == 0:
-                continue
+                row_chart = ctk.CTkFrame(self._chart_container, fg_color="transparent", height=32)
+                row_chart.pack(fill="x", pady=4)
+                row_chart.pack_propagate(False)
 
-            part = (item["total"] / fat * 100) if fat > 0 else 0.0
-            conf = config_visual.get(k, {"icone": "💳", "cor": COR_PRIMARIA})
+                # Rótulo Modalidade
+                ctk.CTkLabel(
+                    row_chart,
+                    text=f"{conf['icone']}  {k}",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    width=150, anchor="w"
+                ).pack(side="left", padx=(4, 8))
 
-            bg = "#252B37" if idx % 2 == 0 else "#1F2430"
-            row = ctk.CTkFrame(self._table_rows_frame, fg_color=bg, corner_radius=6, height=36)
-            row.pack(fill="x", pady=2)
-            row.columnconfigure(0, weight=2)
-            row.columnconfigure(1, weight=1)
-            row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=1)
+                # Barra de Progresso / Proporção
+                bar = ctk.CTkProgressBar(
+                    row_chart,
+                    height=16,
+                    corner_radius=8,
+                    fg_color="#262D3D",
+                    progress_color=conf["cor"]
+                )
+                bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
+                bar.set(prop)
 
-            ctk.CTkLabel(
-                row, text=f"{conf['icone']}  {k}",
-                font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
-            ).grid(row=0, column=0, padx=12, sticky="w")
+                # Porcentagem
+                ctk.CTkLabel(
+                    row_chart,
+                    text=f"{part:5.1f} %",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=conf["cor"] if part > 0 else COR_TEXTO_SUAVE,
+                    width=65, anchor="e"
+                ).pack(side="left", padx=4)
 
-            ctk.CTkLabel(
-                row, text=f"{item['qtd']} pedido(s)",
-                font=ctk.CTkFont(size=12), anchor="w"
-            ).grid(row=0, column=1, padx=8, sticky="w")
+                # Valor Total R$
+                val_fmt = f"R$ {item['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                ctk.CTkLabel(
+                    row_chart,
+                    text=val_fmt,
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COR_TEXTO,
+                    width=110, anchor="e"
+                ).pack(side="left", padx=4)
 
-            val_fmt = f"R$ {item['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            ctk.CTkLabel(
-                row, text=val_fmt,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=COR_VERDE if item["total"] > 0 else COR_TEXTO_SUAVE
-            ).grid(row=0, column=2, padx=8, sticky="e")
+                # Quantidade de Pedidos
+                ctk.CTkLabel(
+                    row_chart,
+                    text=f"({item['qtd']} ped.)",
+                    font=ctk.CTkFont(size=11),
+                    text_color=COR_TEXTO_SUAVE,
+                    width=75, anchor="e"
+                ).pack(side="left", padx=(4, 0))
 
-            ctk.CTkLabel(
-                row, text=f"{part:.1f} %",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=conf["cor"] if part > 0 else COR_TEXTO_SUAVE
-            ).grid(row=0, column=3, padx=12, sticky="e")
+            # ── Renderizar Linhas da Tabela ──
+            for w in self._table_rows_frame.winfo_children():
+                w.destroy()
+
+            for idx, k in enumerate(ordem_mod):
+                item = dados["modalidades"].get(k, {"total": 0.0, "qtd": 0})
+                if k == "Outros" and item["qtd"] == 0:
+                    continue
+
+                part = (item["total"] / fat * 100) if fat > 0 else 0.0
+                conf = config_visual.get(k, {"icone": "💳", "cor": COR_PRIMARIA})
+
+                bg = "#252B37" if idx % 2 == 0 else "#1F2430"
+                row = ctk.CTkFrame(self._table_rows_frame, fg_color=bg, corner_radius=6, height=36)
+                row.pack(fill="x", pady=2)
+                row.columnconfigure(0, weight=2)
+                row.columnconfigure(1, weight=1)
+                row.columnconfigure(2, weight=1)
+                row.columnconfigure(3, weight=1)
+
+                ctk.CTkLabel(
+                    row, text=f"{conf['icone']}  {k}",
+                    font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
+                ).grid(row=0, column=0, padx=12, sticky="w")
+
+                ctk.CTkLabel(
+                    row, text=f"{item['qtd']} pedido(s)",
+                    font=ctk.CTkFont(size=12), anchor="w"
+                ).grid(row=0, column=1, padx=8, sticky="w")
+
+                val_fmt = f"R$ {item['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                ctk.CTkLabel(
+                    row, text=val_fmt,
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COR_VERDE if item["total"] > 0 else COR_TEXTO_SUAVE
+                ).grid(row=0, column=2, padx=8, sticky="e")
+
+                ctk.CTkLabel(
+                    row, text=f"{part:.1f} %",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=conf["cor"] if part > 0 else COR_TEXTO_SUAVE
+                ).grid(row=0, column=3, padx=12, sticky="e")
+        finally:
+            if hasattr(self, "_overlay"):
+                self._overlay.hide()
 
     def _copiar_resumo(self):
         """Copia os dados consolidados do mês atual para o clipboard."""

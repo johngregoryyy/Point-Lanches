@@ -22,6 +22,7 @@ hiddenimports = [
     'PIL',
     'PIL.Image',
     'PIL.ImageTk',
+    'PIL.ImageSequence',
     'PIL._tkinter_finder',
     'sqlite3',
     'socket',
