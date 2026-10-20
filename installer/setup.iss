@@ -49,8 +49,8 @@ Source: "dist\PointLanches\*"; DestDir: "{app}"; Excludes: "*.db,*.db-wal,*.db-s
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"
-Name: "{autodesktop}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"; Tasks: desktopicon
+Name: "{autoprograms}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"; Check: NotPublicShortcutExists
+Name: "{autodesktop}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"; Tasks: desktopicon; Check: NotPublicDesktopExists
 
 [InstallDelete]
 ; Limpar executável e pasta interna da versão antiga antes de instalar a nova
@@ -105,15 +105,24 @@ begin
   end;
 end;
 
+function NotPublicShortcutExists: Boolean;
+begin
+  // Evita atalhos duplicados no menu Iniciar se o atalho publico ja existir
+  Result := not FileExists(ExpandConstant('{commonprograms}\Point Lanches.lnk'));
+end;
+
+function NotPublicDesktopExists: Boolean;
+begin
+  // Evita atalhos duplicados na Area de Trabalho se o atalho publico ja existir
+  Result := not FileExists(ExpandConstant('{commondesktop}\Point Lanches.lnk'));
+end;
+
 procedure DeleteOldShortcuts;
 begin
-  // Remove todos os atalhos antigos duplicados no Menu Iniciar e Desktop (tanto de usuário quanto públicos)
+  // Remove atalhos antigos duplicados no Menu Iniciar e Desktop do usuario
   DeleteFile(ExpandConstant('{userdesktop}\Point Lanches.lnk'));
-  DeleteFile(ExpandConstant('{commondesktop}\Point Lanches.lnk'));
   DeleteFile(ExpandConstant('{userprograms}\Point Lanches.lnk'));
-  DeleteFile(ExpandConstant('{commonprograms}\Point Lanches.lnk'));
   DelTree(ExpandConstant('{userprograms}\Point Lanches'), True, True, True);
-  DelTree(ExpandConstant('{commonprograms}\Point Lanches'), True, True, True);
 end;
 
 procedure WipeAppDir;
