@@ -1,7 +1,10 @@
 import re
 import unicodedata
 import customtkinter as ctk
-from database.db import listar_taxas, listar_ruas
+from database.db import (
+    listar_taxas, listar_ruas,
+    registrar_callback_ruas_modificadas, desregistrar_callback_ruas_modificadas
+)
 from ui.components.widgets import TopBar, ChipButton, habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
@@ -110,9 +113,26 @@ class ScreenDelivery(ctk.CTkFrame):
 
         self._ruas_todas: list[str] = []
         self._ruas_indices: list[tuple[str, str, set[str]]] = []
+        self._ruas_map: dict[str, dict] = {}
         self._carregar_ruas()
 
+        # Inscrição para sincronização em tempo real de novas ruas
+        registrar_callback_ruas_modificadas(self._ao_notificar_ruas_modificadas)
+
         self._build_ui(on_admin)
+
+    def _ao_notificar_ruas_modificadas(self):
+        try:
+            self.after(0, self._carregar_ruas)
+        except Exception:
+            pass
+
+    def destroy(self):
+        try:
+            desregistrar_callback_ruas_modificadas(self._ao_notificar_ruas_modificadas)
+        except Exception:
+            pass
+        super().destroy()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
@@ -335,10 +355,13 @@ class ScreenDelivery(ctk.CTkFrame):
             ruas_db = listar_ruas(apenas_ativas=True)
             if ruas_db:
                 self._ruas_todas = [r["nome"] for r in ruas_db]
+                self._ruas_map = {r["nome"]: r for r in ruas_db}
             else:
                 self._ruas_todas = list(RUAS_DOIS_IRMAOS)
+                self._ruas_map = {}
         except Exception:
             self._ruas_todas = list(RUAS_DOIS_IRMAOS)
+            self._ruas_map = {}
 
         self._ruas_indices = [
             (rua, _strip_accents(rua), gerar_acronimos_rua(rua))
@@ -398,6 +421,22 @@ class ScreenDelivery(ctk.CTkFrame):
                 hover_color=COR_PRIMARIA_HVR if is_match else "#3A3A3A",
                 text_color="#FFFFFF" if is_match else "#DDDDDD"
             )
+
+        # Sugestão automática de bairro e taxa associados à via se disponíveis
+        rua_info = getattr(self, "_ruas_map", {}).get(rua)
+        if rua_info:
+            bairro_rua = rua_info.get("bairro")
+            if bairro_rua and not self._bairro_sel.get():
+                self._selecionar_bairro(bairro_rua)
+
+            taxa_rua = float(rua_info.get("taxa") or 0.0)
+            if taxa_rua > 0:
+                try:
+                    taxa_atual = float(self._taxa_var.get().replace(",", "."))
+                except ValueError:
+                    taxa_atual = 0.0
+                if taxa_atual == 0.0:
+                    self._selecionar_taxa(taxa_rua)
 
     def _selecionar_bairro(self, bairro: str, selecionado: bool = True):
         if selecionado:
@@ -495,6 +534,7 @@ class ScreenDelivery(ctk.CTkFrame):
             chip.set_selected(False)
         for chip in self._taxa_chips:
             chip.set_selected(False)
+        self._carregar_ruas()
         self._renderizar_grid_ruas(self._ruas_todas[:30])
 
     def on_show(self):

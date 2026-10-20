@@ -179,9 +179,11 @@ def init_db():
             );
 
             CREATE TABLE IF NOT EXISTS ruas (
-                id    INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome  TEXT NOT NULL UNIQUE,
-                ativo INTEGER DEFAULT 1
+                id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome   TEXT NOT NULL UNIQUE,
+                bairro TEXT DEFAULT '',
+                taxa   REAL DEFAULT 0.0,
+                ativo  INTEGER DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS insumos (
@@ -207,6 +209,8 @@ def init_db():
         for sql in [
             "ALTER TABLE itens_pedido ADD COLUMN categoria TEXT DEFAULT ''",
             "ALTER TABLE categorias ADD COLUMN ordem INTEGER DEFAULT 0",
+            "ALTER TABLE ruas ADD COLUMN bairro TEXT DEFAULT ''",
+            "ALTER TABLE ruas ADD COLUMN taxa REAL DEFAULT 0.0",
         ]:
             try:
                 conn.execute(sql)
@@ -387,6 +391,24 @@ def proximo_numero_pedido():
 
 def salvar_pedido(pedido: dict, itens: list) -> int:
     numero = proximo_numero_pedido()
+
+    # ── Auto-cadastro inteligente de ruas não mapeadas (silencioso e assíncrono à UI) ──
+    rua_raw = (pedido.get("rua") or "").strip()
+    bairro = (pedido.get("bairro") or "").strip()
+    try:
+        taxa = float(pedido.get("taxa_entrega", 0.0) or 0.0)
+    except (ValueError, TypeError):
+        taxa = 0.0
+
+    if rua_raw:
+        try:
+            _, rua_info = cadastrar_rua_se_inedita(rua_raw, bairro=bairro, taxa=taxa)
+            if rua_info and rua_info.get("nome"):
+                # Padroniza a via no pedido e no cupom com formatação Title Case e acentos
+                pedido["rua"] = rua_info["nome"]
+        except Exception:
+            pass
+
     with get_connection() as conn:
         cur = conn.execute("""
             INSERT INTO pedidos
@@ -778,6 +800,109 @@ RUAS_OFICIAIS_DOIS_IRMAOS = [
 ]
 
 
+# ── Gerenciamento e Cache de Ruas ──────────────────────────────────────────────
+
+_ON_RUAS_MODIFICADAS_CALLBACKS: list = []
+
+
+def registrar_callback_ruas_modificadas(callback):
+    """Permite que telas como ScreenDelivery se inscrevam para atualização instantânea."""
+    if callback not in _ON_RUAS_MODIFICADAS_CALLBACKS:
+        _ON_RUAS_MODIFICADAS_CALLBACKS.append(callback)
+
+
+def desregistrar_callback_ruas_modificadas(callback):
+    if callback in _ON_RUAS_MODIFICADAS_CALLBACKS:
+        _ON_RUAS_MODIFICADAS_CALLBACKS.remove(callback)
+
+
+def _notificar_ruas_modificadas():
+    for cb in list(_ON_RUAS_MODIFICADAS_CALLBACKS):
+        try:
+            cb()
+        except Exception:
+            pass
+
+
+_PREPOSICOES_PT = {'de', 'da', 'do', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas'}
+_PREFIXOS_RUAS = {
+    'av': 'Av.', 'av.': 'Av.', 'avenida': 'Av.',
+    'r': 'Rua', 'r.': 'Rua', 'rua': 'Rua',
+    'estr': 'Estrada', 'estr.': 'Estrada', 'estrada': 'Estrada',
+    'trav': 'Travessa', 'trav.': 'Travessa', 'travessa': 'Travessa',
+    'al': 'Alameda', 'al.': 'Alameda', 'alameda': 'Alameda',
+    'rod': 'Rodovia', 'rod.': 'Rodovia', 'rodovia': 'Rodovia',
+    'beco': 'Beco'
+}
+_TITULOS_RUAS = {
+    'dr': 'Dr.', 'dr.': 'Dr.', 'dra': 'Dra.', 'dra.': 'Dra.',
+    'prof': 'Prof.', 'prof.': 'Prof.', 'cel': 'Coronel', 'cel.': 'Coronel',
+    'mal': 'Marechal', 'mal.': 'Marechal', 'gen': 'General', 'gen.': 'General'
+}
+
+
+def _strip_accents(text: str) -> str:
+    """Remove acentos e converte para minúsculas."""
+    import unicodedata
+    nfkd = unicodedata.normalize('NFKD', text)
+    return ''.join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
+
+def formatar_nome_rua(nome: str) -> str:
+    """
+    Formata o nome da via para Title Case adequado em português:
+    - Remove espaços extras
+    - Normaliza prefixos comuns ('r.' -> 'Rua', 'av' -> 'Av.')
+    - Mantém preposições em minúsculas ('de', 'da', 'dos')
+    - Capitaliza demais palavras
+    """
+    if not nome or not nome.strip():
+        return ""
+    partes = nome.strip().split()
+    palavras = []
+    for i, p in enumerate(partes):
+        p_low = p.lower()
+        if i == 0:
+            palavras.append(_PREFIXOS_RUAS.get(p_low, p.capitalize()))
+        else:
+            if p_low in _PREPOSICOES_PT:
+                palavras.append(p_low)
+            elif p_low in _TITULOS_RUAS:
+                palavras.append(_TITULOS_RUAS[p_low])
+            elif p_low in _PREFIXOS_RUAS:
+                palavras.append(_PREFIXOS_RUAS[p_low])
+            elif p.isupper() and len(p) <= 3 and p.isalpha():
+                palavras.append(p)
+            elif any(c.isdigit() for c in p):
+                palavras.append(p.upper() if p.isalnum() and not p.isdigit() else p)
+            else:
+                palavras.append(p.capitalize())
+    return " ".join(palavras)
+
+
+def normalizar_rua_para_comparacao(nome: str) -> str:
+    """
+    Normaliza a rua para detecção rigorosa de duplicidade:
+    - Sem acentos, minúsculas, pontuações removidas
+    - Padronização de prefixos equivalentes (av / avenida -> av, r / rua -> rua)
+    """
+    import re
+    clean = _strip_accents(nome)
+    clean = re.sub(r'[^\w\s]', ' ', clean)
+    tokens = clean.split()
+    if not tokens:
+        return ""
+    if tokens[0] in ('av', 'avenida'):
+        tokens[0] = 'av'
+    elif tokens[0] in ('r', 'rua'):
+        tokens[0] = 'rua'
+    elif tokens[0] in ('estr', 'estrada'):
+        tokens[0] = 'estrada'
+    elif tokens[0] in ('trav', 'travessa'):
+        tokens[0] = 'travessa'
+    return " ".join(tokens)
+
+
 def listar_ruas(apenas_ativas=True):
     with get_connection() as conn:
         q = "SELECT * FROM ruas"
@@ -787,17 +912,108 @@ def listar_ruas(apenas_ativas=True):
         return [dict(r) for r in conn.execute(q).fetchall()]
 
 
-def adicionar_rua(nome: str, ativo: int = 1):
+def cadastrar_rua_se_inedita(nome: str, bairro: str = "", taxa: float = 0.0) -> tuple[bool, dict | None]:
+    """
+    Verifica se a rua já existe no SQLite local (insensível a acentos/maiúsculas).
+    - Se for inédita: formata em Title Case, insere com bairro e taxa, notifica cache e retorna (True, dict).
+    - Se já existir: enriquece bairro/taxa se estavam vazios e retorna (False, dict_existente).
+    """
+    nome_limpo = " ".join((nome or "").split()).strip()
+    if not nome_limpo or len(nome_limpo) < 3 or nome_limpo.isdigit():
+        return False, None
+
+    nome_formatado = formatar_nome_rua(nome_limpo)
+    norm_candidato = normalizar_rua_para_comparacao(nome_formatado)
+    if not norm_candidato:
+        return False, None
+
+    bairro_str = (bairro or "").strip()
+    taxa_val = float(taxa or 0.0)
+
+    with get_connection() as conn:
+        linhas = conn.execute("SELECT id, nome, bairro, taxa, ativo FROM ruas").fetchall()
+        for r in linhas:
+            r_dict = dict(r)
+            norm_existente = normalizar_rua_para_comparacao(r_dict["nome"])
+            if norm_candidato == norm_existente:
+                # Já cadastrada! Atualizar bairro ou taxa se antes estavam vazios
+                update_needed = False
+                novo_bairro = r_dict.get("bairro") or ""
+                nova_taxa = float(r_dict.get("taxa") or 0.0)
+
+                if bairro_str and not novo_bairro:
+                    novo_bairro = bairro_str
+                    update_needed = True
+                if taxa_val > 0 and nova_taxa == 0.0:
+                    nova_taxa = taxa_val
+                    update_needed = True
+
+                if update_needed:
+                    try:
+                        conn.execute(
+                            "UPDATE ruas SET bairro = ?, taxa = ? WHERE id = ?",
+                            (novo_bairro, nova_taxa, r_dict["id"])
+                        )
+                        r_dict["bairro"] = novo_bairro
+                        r_dict["taxa"] = nova_taxa
+                    except Exception:
+                        pass
+                return False, r_dict
+
+        # Se a taxa for 0, mas tivermos bairro, verificar se outras ruas do mesmo bairro têm taxa cadastrada
+        if taxa_val == 0.0 and bairro_str:
+            row_tx = conn.execute(
+                "SELECT taxa FROM ruas WHERE bairro = ? AND taxa > 0 LIMIT 1",
+                (bairro_str,)
+            ).fetchone()
+            if row_tx and row_tx["taxa"]:
+                taxa_val = float(row_tx["taxa"])
+
+        # Inserção de rua inédita
+        try:
+            cur = conn.execute(
+                "INSERT INTO ruas (nome, bairro, taxa, ativo) VALUES (?, ?, ?, 1)",
+                (nome_formatado, bairro_str, taxa_val)
+            )
+            nova_rua = {
+                "id": cur.lastrowid,
+                "nome": nome_formatado,
+                "bairro": bairro_str,
+                "taxa": taxa_val,
+                "ativo": 1
+            }
+        except Exception:
+            # Caso ocorra conflito
+            row = conn.execute("SELECT * FROM ruas WHERE nome = ?", (nome_formatado,)).fetchone()
+            return False, dict(row) if row else None
+
+    # Manter sincronizado com lista de fallback em memória se existir
+    try:
+        from config import RUAS_DOIS_IRMAOS
+        if nome_formatado not in RUAS_DOIS_IRMAOS:
+            RUAS_DOIS_IRMAOS.append(nome_formatado)
+            RUAS_DOIS_IRMAOS.sort()
+    except Exception:
+        pass
+
+    # Disparar atualização nos ouvintes de UI
+    _notificar_ruas_modificadas()
+    return True, nova_rua
+
+
+def adicionar_rua(nome: str, bairro: str = "", taxa: float = 0.0, ativo: int = 1):
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO ruas (nome, ativo) VALUES (?, ?)",
-            (nome.strip(), ativo)
+            "INSERT OR IGNORE INTO ruas (nome, bairro, taxa, ativo) VALUES (?, ?, ?, ?)",
+            (nome.strip(), (bairro or "").strip(), float(taxa or 0.0), ativo)
         )
+    _notificar_ruas_modificadas()
 
 
 def remover_rua(rua_id: int):
     with get_connection() as conn:
         conn.execute("UPDATE ruas SET ativo=0 WHERE id=?", (rua_id,))
+    _notificar_ruas_modificadas()
 
 
 def importar_ruas_geojson(caminho: str = None) -> int:
@@ -1015,8 +1231,11 @@ def importar_dados_json(dados: dict) -> tuple[bool, str]:
             if "ruas" in dados and isinstance(dados["ruas"], list):
                 for r in dados["ruas"]:
                     if r.get("nome"):
-                        conn.execute("INSERT OR IGNORE INTO ruas (nome, ativo) VALUES (?, ?)",
-                                     (r["nome"], r.get("ativo", 1)))
+                        conn.execute(
+                            "INSERT OR IGNORE INTO ruas (nome, bairro, taxa, ativo) VALUES (?, ?, ?, ?)",
+                            (r["nome"], r.get("bairro", ""), float(r.get("taxa") or 0.0), r.get("ativo", 1))
+                        )
+                _notificar_ruas_modificadas()
 
         return True, "Configurações importadas e aplicadas com sucesso!"
     except Exception as e:

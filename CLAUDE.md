@@ -214,7 +214,7 @@ def get_base_dir() -> str:
 - `pedidos`: ID, Número sequencial, Cliente (Nome/Telefone), Endereço completo, Valores, Forma de Pagamento, Status, Data/Hora
 - `itens_pedido`: ID, Pedido_ID, Produto_ID, Nome, Preço Unitário, Quantidade, Observação, Categoria
 - `observacoes_padrao`: ID, Texto da observação, Ativo (carregadas dinamicamente no modal de personalização)
-- `ruas`: ID, Nome, Ativo (base saneada e importada via GeoJSON do OpenStreetMap)
+- `ruas`: ID, Nome, Bairro, Taxa, Ativo (base saneada via GeoJSON e enriquecida por auto-cadastro dinâmico de novas vias)
 - `insumos`: ID, Nome, Unidade de Medida, Custo Unitário, Estoque Atual, Ativo (preparação para custos e estoque futuros)
 - `movimentacoes_insumos`: ID, Insumo_ID, Tipo (entrada/saida/perda), Quantidade, Valor Total, Data
 - `configuracoes`: Chave-Valor (armazena tipo de impressora, IP e nome da impressora USB)
@@ -227,13 +227,17 @@ def get_base_dir() -> str:
 - Para adicionar itens no cardápio de fábrica, edite a lista `CARDAPIO` em `database/seed.py`.
 - Em tempo de execução, o operador pode cadastrar novos itens diretamente pela aba **Admin -> Cardápio**.
 
-### 8.2. Base de Ruas, GeoJSON e Gerador Dinâmico de Acrônimos
+### 8.2. Base de Ruas, GeoJSON, Auto-Cadastro e Gerador Dinâmico de Acrônimos
 - A base de vias fica armazenada na tabela `ruas` do SQLite e é alimentada via `importar_ruas_geojson()` (OpenStreetMap/Overpass API ou lista oficial de Dois Irmãos).
 - **Algoritmo de Siglas/Acrônimos 100% Dinâmico (`gerar_acronimos_rua`):**
   - Não utiliza listas manuais fixas. Para qualquer via, descarta prefixos genéricos ("Rua", "Av.", "Estrada") e preposições ("de", "da"), gerando automaticamente as siglas de busca (`sm`, `ar`, `10s`, `nh`, `fl`, `sap`, etc.).
 - **Busca de Ruas com Ranking de Relevância e Debounce:**
   - Debounce de 180ms evita travamento da UI durante digitação rápida.
   - Resultados ordenados por relevância e limitados aos 30 mais relevantes.
+- **Auto-Cadastro de Ruas Não Mapeadas (`cadastrar_rua_se_inedita`):**
+  - Quando o operador digita uma rua inexistente na etapa de entrega e conclui o pedido, o sistema captura o nome, aplica formatação Title Case em português (`formatar_nome_rua`) e verifica duplicidade ignorando acentuação e caixa (`normalizar_rua_para_comparacao`).
+  - A nova via é gravada de forma silenciosa na tabela `ruas` vinculada ao bairro e taxa do pedido durante `salvar_pedido`, sem atrasar a impressão do cupom.
+  - O barramento `_notificar_ruas_modificadas` sincroniza o cache em memória de `ScreenDelivery` em tempo real, permitindo que a nova rua já apareça nas sugestões/autocomplete dos próximos pedidos e auto-preencha bairro e taxa ao ser clicada.
 
 ### 8.3. Controles do Carrinho (CartItem) & Regras de Negócio
 - `CartItem` utiliza sub-frame dedicado `qty_frame` com largura fixa de 90px (`pack_propagate(False)`), contendo botões (-) e (+) com 28×28px e label centralizada de 30px, além de preço de 75px e lixeira de 30px. O nome do item utiliza `wraplength=115` e expansão de coluna, impedindo que botões colapsem ou sumam.
