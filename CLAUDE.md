@@ -269,6 +269,18 @@ Sempre que fizer alterações no código Python:
 - **Checagem Silenciosa em Background:** 2 segundos após iniciar a interface gráfica, uma thread separada consulta `https://api.github.com/repos/{OWNER}/{REPO}/releases/latest`. Em caso de ausência de internet ou indisponibilidade da API, a falha é tratada de forma silenciosa para não interromper o caixa.
 - **Diálogo Interativo de Atualização:** Se houver versão mais recente (`is_newer_version`), exibe modal com o changelog oficial e botões `[Atualizar Agora]` e `[Lembrar Mais Tarde]`.
 - **Substituição e Reinicialização sem Lock no Windows:**
-  - O binário é baixado em segundo plano com barra de progresso em tempo real como `PointLanches_update.exe`.
-  - Gera e dispara um processo desanexado (`updater.bat`) que aguarda o encerramento do processo principal, remove o executável antigo bloqueado pelo Windows, move o novo binário para o nome original, reinicia o sistema atualizado e apaga o próprio arquivo `.bat`.
-  - O processo Python encerra com `sys.exit(0)`, liberando imediatamente o handle de arquivo para o Windows.
+  - O binário/instalador é baixado em segundo plano com barra de progresso em tempo real em `%TEMP%`.
+  - Logs detalhados são registrados em `point_lanches_update.log` e `point_lanches_installer.log`.
+  - Dispara processo desanexado (`updater.bat`) com auto-elevação UAC (`runas`), encerra o executável atual, executa a atualização silenciosa com `/DIR` explícito, reinicia o sistema atualizado e apaga os arquivos temporários.
+
+---
+
+## 9. Roadmap / Débito Técnico Futuro
+
+### 9.1. Migração para Banco de Dados Online (Supabase)
+- **Persistência Local Atual como Contingência:**
+  A validação, persistência e contingência de banco de dados SQLite local (`%LOCALAPPDATA%/PointLanches/data/point_lanches.db`) é uma solução temporária de contingência offline/local para o PDV comercial.
+- **Diretriz de Transição para o Supabase (PostgreSQL em Nuvem):**
+  No momento em que for solicitada a migração para o Supabase:
+  1. A rotina de validação/cópia de banco local de inicialização e migração de arquivos locais deverá ser removida ou adaptada exclusivamente como cache local offline temporário (para operação ininterrupta do caixa em caso de perda de conexão de internet).
+  2. As operações de leitura e gravação de pedidos, cardápio, taxas e fechamento financeiro passarão a sincronizar diretamente com as tabelas do PostgreSQL no Supabase via API/SDK.

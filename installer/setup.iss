@@ -28,10 +28,11 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=dialog commandline
 
 [Dirs]
 Name: "{app}"; Permissions: users-full
+Name: "{localappdata}\PointLanches\data"; Permissions: users-full
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
@@ -40,8 +41,8 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-; Todos os arquivos da distribuição onedir gerada pelo PyInstaller
-Source: "dist\PointLanches\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Todos os arquivos da distribuição onedir gerada pelo PyInstaller (exclui explicitamente qualquer arquivo de banco SQLite)
+Source: "dist\PointLanches\*"; DestDir: "{app}"; Excludes: "*.db,*.db-wal,*.db-shm"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Garantir a presença de todos os assets (ícone, loading gif, etc.) no diretório instalado
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 

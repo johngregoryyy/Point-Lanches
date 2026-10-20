@@ -19,38 +19,59 @@ def _can_write_to_dir(folder: str) -> bool:
         return False
 
 
+def get_persistent_data_dir() -> str:
+    """
+    Retorna o diretório persistente oficial para os dados da aplicação:
+    %LOCALAPPDATA%/PointLanches/data/
+    """
+    local_app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+    data_dir = os.path.join(local_app_data, "PointLanches", "data")
+    os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
+
 def get_base_dir() -> str:
     """
-    Retorna o diretório base persistente da aplicação para o banco SQLite:
-    1. Se o diretório do executável (.exe) for gravável (modo portátil / dev), usa ele.
-    2. Se não for gravável (ex: C:\\Program Files com UAC ativo), usa %LOCALAPPDATA%\\Point Lanches.
-    Isso impede o erro 'sqlite3.OperationalError: unable to open database file'.
+    Retorna o diretório base persistente da aplicação para o banco SQLite.
+    Garante que atualizações do software NUNCA sobrescrevam os dados existentes:
+    1. Se o banco 'point_lanches.db' já existir em %LOCALAPPDATA%/PointLanches/data/, usa ele diretamente
+       e NUNCA o substitui nem sobrescreve.
+    2. Se NÃO existir no diretório persistente (primeira execução ou upgrade de versão legada):
+       - Verifica se há banco existente na pasta legada (%LOCALAPPDATA%/Point Lanches ou pasta do executável)
+         e migra com segurança para o novo diretório sem perda de pedidos ou produtos.
+       - Se for instalação limpa nova, cria o diretório para que init_db() crie o schema inicial.
     """
-    if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        if _can_write_to_dir(exe_dir):
-            return exe_dir
+    # Em modo de desenvolvimento (não compilado), se houver banco na raiz do projeto, utiliza ele
+    if not getattr(sys, "frozen", False):
+        dev_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.isfile(os.path.join(dev_dir, "point_lanches.db")):
+            return dev_dir
 
-        # Fallback seguro para Program Files: dados persistidos no perfil do usuário
-        app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
-        point_data = os.path.join(app_data, "Point Lanches")
-        os.makedirs(point_data, exist_ok=True)
+    data_dir = get_persistent_data_dir()
+    target_db = os.path.join(data_dir, "point_lanches.db")
 
-        # Se houver um point_lanches.db pré-existente na pasta do executável, migra para cá
-        existing_db = os.path.join(exe_dir, "point_lanches.db")
-        target_db = os.path.join(point_data, "point_lanches.db")
-        if os.path.isfile(existing_db) and not os.path.isfile(target_db):
+    # REGRA CRÍTICA: Se o banco já existe no diretório persistente, NUNCA substitua!
+    if os.path.isfile(target_db):
+        return data_dir
+
+    # Se ainda não existe no diretório persistente, busca bases de dados legadas para migrar
+    candidatos_legados = [
+        # a) %LOCALAPPDATA%/Point Lanches/point_lanches.db (usado em v1.0.1 a v1.0.4)
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Point Lanches", "point_lanches.db"),
+        # b) Pasta do executável (modo portátil legado)
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "point_lanches.db") if getattr(sys, "frozen", False) else "",
+    ]
+
+    for legado in candidatos_legados:
+        if legado and os.path.isfile(legado):
             try:
                 import shutil
-                shutil.copy2(existing_db, target_db)
+                shutil.copy2(legado, target_db)
+                break
             except Exception:
                 pass
 
-        return point_data
-
-    dev_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    os.makedirs(dev_dir, exist_ok=True)
-    return dev_dir
+    return data_dir
 
 
 def get_resource_path(relative_path: str = "") -> str:

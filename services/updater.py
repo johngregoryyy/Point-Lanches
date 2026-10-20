@@ -13,6 +13,8 @@ import urllib.error
 import threading
 import subprocess
 import webbrowser
+import tempfile
+import ctypes
 import customtkinter as ctk
 
 from version import __version__
@@ -21,6 +23,29 @@ from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_CINZA_BARRA, COR_TEXTO_SUAVE, COR_AZUL_POINT, COR_TEXTO
 )
+
+
+# ── Utilitários de Permissão e Elevação UAC no Windows ─────────────────────────
+
+def _is_running_as_admin() -> bool:
+    """Verifica se o processo atual está executando com privilégios de Administrador."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
+def _can_write_to_folder(path: str) -> bool:
+    """Testa se o diretório permite criação e exclusão direta de arquivos sem UAC."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        test_file = os.path.join(path, f".chk_perm_{os.getpid()}.tmp")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("test")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
 
 
 # ── Contexto SSL Resiliente para Windows ─────────────────────────────────────
@@ -293,8 +318,34 @@ class UpdateDialog(ctk.CTkToplevel):
         asset_name = target_asset.get("name", "PointLanches.exe")
         is_setup_installer = ("setup" in asset_name.lower() or "instal" in asset_name.lower())
 
-        temp_file = os.path.join(exe_dir, "PointLanches_Setup_temp.exe" if is_setup_installer else "PointLanches_update.exe")
-        bat_script = os.path.join(exe_dir, "updater.bat")
+        # 2. Configurar caminhos em tempfile.gettempdir() e arquivos de log
+        temp_dir = tempfile.gettempdir()
+        temp_file = os.path.join(
+            temp_dir,
+            f"PointLanches_Setup_v{self._tag}.exe" if is_setup_installer else f"PointLanches_update_v{self._tag}.exe"
+        )
+        bat_script = os.path.join(temp_dir, f"PointLanches_updater_{self._tag}.bat")
+        update_log_file = os.path.join(temp_dir, "point_lanches_update.log")
+        installer_log_file = os.path.join(temp_dir, "point_lanches_installer.log")
+
+        def _log_update(msg: str):
+            try:
+                with open(update_log_file, "a", encoding="utf-8") as lf:
+                    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                    lf.write(f"[{ts}] {msg}\n")
+            except Exception:
+                pass
+
+        _log_update("===================================================")
+        _log_update(f"INICIANDO PROCESSO DE ATUALIZACAO -> v{self._tag}")
+        _log_update(f"Versao local: {__version__}")
+        _log_update(f"Executavel atual: {current_exe}")
+        _log_update(f"Diretorio de instalacao: {exe_dir}")
+        _log_update(f"Instalado via Inno Setup: {is_installed}")
+        _log_update(f"Asset selecionado: {asset_name} ({total_size} bytes)")
+        _log_update(f"URL de download: {download_url}")
+        _log_update(f"Arquivo temporario de download: {temp_file}")
+        _log_update(f"Script batch do updater: {bat_script}")
 
         # 3. Baixar arquivo com relatório em tempo real
         try:
@@ -335,6 +386,9 @@ class UpdateDialog(ctk.CTkToplevel):
                             self._progress_detail_lbl.configure(text=f"{pct}% ({md:.1f} MB / {mt:.1f} MB)")
                         ))
 
+            downloaded_bytes = os.path.getsize(temp_file) if os.path.isfile(temp_file) else 0
+            _log_update(f"Download concluido com sucesso! Tamanho no disco: {downloaded_bytes} bytes")
+
             self.after(0, lambda: (
                 self._download_gif.stop() if hasattr(self, '_download_gif') else None,
                 self._download_status_lbl.configure(
@@ -345,6 +399,7 @@ class UpdateDialog(ctk.CTkToplevel):
             time.sleep(1)
 
         except Exception as exc:
+            _log_update(f"ERRO durante o download: {exc}")
             self.after(0, lambda e=exc: (
                 self._download_gif.stop() if hasattr(self, '_download_gif') else None,
                 self._download_status_lbl.configure(
@@ -362,23 +417,40 @@ class UpdateDialog(ctk.CTkToplevel):
                 batch_content = f"""@echo off
 chcp 65001 >nul
 title Atualizando Point Lanches...
-echo ===================================================
-echo     ATUALIZANDO POINT LANCHES PARA A VERSAO {self._tag}
-echo ===================================================
-echo Aguardando fechamento do aplicativo...
+set LOGFILE={update_log_file}
+
+echo =================================================== >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Iniciando script de atualizacao >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Versao alvo: {self._tag} >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Instalador: "{temp_file}" >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Diretorio destino: "{exe_dir}" >> "%LOGFILE%"
+
+:: Fallback de elevacao UAC em lote caso executado em diretorio protegido
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [%date% %time%] [updater.bat] Sem privilegios de administrador. Solicitando UAC RunAs... >> "%LOGFILE%"
+    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
+    exit /b
+)
+
+echo [%date% %time%] [updater.bat] Aguardando 2 segundos para encerramento do processo... >> "%LOGFILE%"
 timeout /t 2 /nobreak >nul
 
 :: Garante o encerramento do processo antes de rodar o instalador
-taskkill /f /im "{exe_name}" >nul 2>&1
+echo [%date% %time%] [updater.bat] Encerrando processo "{exe_name}"... >> "%LOGFILE%"
+taskkill /f /im "{exe_name}" >> "%LOGFILE%" 2>&1
 timeout /t 1 /nobreak >nul
 
-echo Instalando nova versao...
-start /wait "" "{temp_file}" /SILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS
+echo [%date% %time%] [updater.bat] Executando instalador Inno Setup... >> "%LOGFILE%"
+"{temp_file}" /SP- /SILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS /DIR="{exe_dir}" /LOG="{installer_log_file}"
+set SETUP_RET=%ERRORLEVEL%
+echo [%date% %time%] [updater.bat] Instalador finalizou com retorno: %SETUP_RET% >> "%LOGFILE%"
 
-echo Reiniciando Point Lanches...
+echo [%date% %time%] [updater.bat] Reiniciando Point Lanches em "{current_exe}"... >> "%LOGFILE%"
 start "" "{current_exe}"
 
 :: Limpar instalador baixado e este script
+echo [%date% %time%] [updater.bat] Limpando arquivos temporarios... >> "%LOGFILE%"
 del /f /q "{temp_file}" >nul 2>&1
 del /f /q "%~f0" >nul 2>&1
 exit
@@ -387,11 +459,17 @@ exit
                 batch_content = f"""@echo off
 chcp 65001 >nul
 title Atualizando Point Lanches...
-echo ===================================================
-echo     ATUALIZANDO POINT LANCHES PARA A VERSAO {self._tag}
-echo ===================================================
-echo Aguardando fechamento do aplicativo...
+set LOGFILE={update_log_file}
+
+echo =================================================== >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Iniciando script de atualizacao standalone >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Versao alvo: {self._tag} >> "%LOGFILE%"
+echo [%date% %time%] [updater.bat] Aguardando 2 segundos para encerramento... >> "%LOGFILE%"
 timeout /t 2 /nobreak >nul
+
+:: Garante encerramento do executavel antigo
+taskkill /f /im "{exe_name}" >> "%LOGFILE%" 2>&1
+timeout /t 1 /nobreak >nul
 
 :espera_lock
 del /f /q "{current_exe}" >nul 2>&1
@@ -400,10 +478,10 @@ if exist "{current_exe}" (
     goto espera_lock
 )
 
-echo Substituindo executavel...
-move /y "{temp_file}" "{current_exe}" >nul 2>&1
+echo [%date% %time%] [updater.bat] Substituindo executavel... >> "%LOGFILE%"
+move /y "{temp_file}" "{current_exe}" >> "%LOGFILE%" 2>&1
 
-echo Reiniciando Point Lanches...
+echo [%date% %time%] [updater.bat] Reiniciando Point Lanches em "{current_exe}"... >> "%LOGFILE%"
 start "" "{current_exe}"
 
 :: Auto-excluir este script batch temporario
@@ -413,28 +491,49 @@ exit
             try:
                 with open(bat_script, "w", encoding="utf-8") as f:
                     f.write(batch_content)
+                _log_update(f"Script batch criado com sucesso em: {bat_script}")
 
-                # Disparar processo desanexado do terminal
-                DETACHED_FLAGS = (
-                    subprocess.CREATE_NEW_PROCESS_GROUP |
-                    subprocess.DETACHED_PROCESS |
-                    subprocess.CREATE_NO_WINDOW
-                )
-                subprocess.Popen(
-                    ["cmd.exe", "/c", bat_script],
-                    creationflags=DETACHED_FLAGS,
-                    close_fds=True
-                )
+                # Avaliar se o diretório precisa de elevação de Administrador (ex: C:\Program Files)
+                needs_admin = (not _can_write_to_folder(exe_dir)) or ("program files" in exe_dir.lower())
+                is_admin = _is_running_as_admin()
+                _log_update(f"Checagem de privilegios: is_admin={is_admin}, needs_admin={needs_admin}")
 
-                # Encerrar aplicativo imediatamente para liberar o lock do Windows
-                self.after(100, lambda: os._exit(0))
+                if needs_admin and not is_admin:
+                    _log_update("Disparando atualizacao via ShellExecuteW com verbo 'runas' (UAC)...")
+                    ret = ctypes.windll.shell32.ShellExecuteW(
+                        None,
+                        "runas",
+                        "cmd.exe",
+                        f'/c "{bat_script}"',
+                        None,
+                        1
+                    )
+                    _log_update(f"ShellExecuteW executado com retorno: {ret}")
+                else:
+                    _log_update("Disparando atualizacao desanexada via subprocess.Popen...")
+                    DETACHED_FLAGS = (
+                        subprocess.CREATE_NEW_PROCESS_GROUP |
+                        subprocess.DETACHED_PROCESS |
+                        subprocess.CREATE_NO_WINDOW
+                    )
+                    p = subprocess.Popen(
+                        ["cmd.exe", "/c", bat_script],
+                        creationflags=DETACHED_FLAGS,
+                        close_fds=True
+                    )
+                    _log_update(f"Subprocesso Popen iniciado PID: {p.pid}")
+
+                # Aguardar 350ms para que o Windows inicialize o novo processo antes do encerramento
+                self.after(350, lambda: os._exit(0))
             except Exception as e:
+                _log_update(f"FALHA ao disparar updater: {e}")
                 self.after(0, lambda err=e: self._download_status_lbl.configure(
                     text=f"Falha ao iniciar updater: {err}",
                     text_color=COR_VERMELHO
                 ))
         else:
             # Em modo dev: avisa que baixou e deixa o arquivo salvo para inspeção
+            _log_update(f"[Modo Dev] Atualizacao baixada em: {temp_file}")
             self.after(0, lambda: self._download_status_lbl.configure(
                 text="[Modo Dev] Atualização baixada em:\n" + temp_file,
                 text_color=COR_VERDE
