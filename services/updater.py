@@ -72,6 +72,44 @@ except AttributeError:
     pass
 
 
+def _get_github_token() -> str | None:
+    """Recupera o token do GitHub de variáveis de ambiente ou arquivo local se disponível."""
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        return token.strip()
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github_token"),
+        os.path.expanduser("~/.github_token")
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            try:
+                with open(c, "r", encoding="utf-8") as f:
+                    t = f.read().strip()
+                    if t:
+                        return t
+            except Exception:
+                pass
+    return None
+
+
+class SmartRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Handler de redirecionamento inteligente:
+    1. Remove o cabeçalho Authorization ao redirecionar para serviços de storage (AWS S3, Azure Blob)
+       para evitar rejeições de autenticação de terceiros.
+    2. Se o host for release-assets.githubusercontent.com (suscetível a erros 503 Backend unavailable
+       por falha de cache/Varnish do Fastly no Brasil), contorna apontando diretamente para o storage origin.
+    """
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_headers = dict(req.headers)
+        new_headers.pop('Authorization', None)
+        new_headers.pop('authorization', None)
+        if 'release-assets.githubusercontent.com' in newurl:
+            newurl = newurl.replace('release-assets.githubusercontent.com', 'releaseassetproduction.blob.core.windows.net')
+        return urllib.request.Request(newurl, headers=new_headers, origin_req_host=req.origin_req_host, unverifiable=True)
+
+
 def _parse_version(v_str: str) -> tuple[int, ...]:
     """
     Converte uma string de versão (ex: 'v1.0.1' ou '1.2.0') em tupla de inteiros
@@ -347,60 +385,95 @@ class UpdateDialog(ctk.CTkToplevel):
         _log_update(f"Arquivo temporario de download: {temp_file}")
         _log_update(f"Script batch do updater: {bat_script}")
 
-        # 3. Baixar arquivo com relatório em tempo real
-        try:
-            self.after(0, lambda: self._download_status_lbl.configure(
-                text=f"Baixando {asset_name}...",
-                text_color=COR_AZUL_POINT
-            ))
+        # 3. Baixar arquivo via API oficial de assets com retry automático (3 tentativas)
+        token = _get_github_token()
+        asset_id = target_asset.get("id")
+        api_download_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/assets/{asset_id}" if asset_id else download_url
 
-            req = urllib.request.Request(
-                download_url,
-                headers={"User-Agent": f"PointLanches-Updater/{__version__}"}
-            )
+        ssl_ctx = _get_ssl_context()
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=ssl_ctx),
+            SmartRedirectHandler
+        )
 
-            downloaded = 0
-            chunk_size = 65536  # 64 KB por bloco para download rápido
+        max_tentativas = 3
+        sucesso = False
+        ultimo_erro = None
+        downloaded_bytes = 0
 
-            # Utiliza contexto SSL tolerante para evitar erros de certificado no Windows
-            ssl_ctx = _get_ssl_context()
-            with urllib.request.urlopen(req, timeout=30, context=ssl_ctx) as resp, open(temp_file, "wb") as out_file:
-                if total_size <= 0:
-                    total_size = int(resp.headers.get("Content-Length", 0))
+        for tentativa in range(1, max_tentativas + 1):
+            _log_update(f"Iniciando tentativa {tentativa}/{max_tentativas} de download via API: {api_download_url}")
+            try:
+                if tentativa > 1:
+                    self.after(0, lambda t=tentativa: self._download_status_lbl.configure(
+                        text=f"Tentando novamente ({t}/{max_tentativas})...",
+                        text_color=COR_AZUL_POINT
+                    ))
+                else:
+                    self.after(0, lambda: self._download_status_lbl.configure(
+                        text=f"Baixando {asset_name}...",
+                        text_color=COR_AZUL_POINT
+                    ))
 
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    out_file.write(chunk)
-                    downloaded += len(chunk)
+                headers = {
+                    "Accept": "application/octet-stream",
+                    "User-Agent": "PointLanches-Updater"
+                }
+                if token:
+                    headers["Authorization"] = f"token {token}"
 
-                    if total_size > 0:
-                        prog = downloaded / total_size
-                        mb_down = downloaded / (1024 * 1024)
-                        mb_total = total_size / (1024 * 1024)
-                        percent = int(prog * 100)
+                # Na 1a e 2a tentativa prioriza o endpoint oficial da API de assets; na 3a tenta browser_download_url como alternativa
+                url_requisicao = api_download_url if (tentativa < 3 or not download_url) else download_url
+                req = urllib.request.Request(url_requisicao, headers=headers)
 
-                        self.after(0, lambda p=prog, pct=percent, md=mb_down, mt=mb_total: (
-                            self._progress_bar.set(p),
-                            self._progress_detail_lbl.configure(text=f"{pct}% ({md:.1f} MB / {mt:.1f} MB)")
-                        ))
+                downloaded = 0
+                chunk_size = 65536  # 64 KB por bloco
 
-            downloaded_bytes = os.path.getsize(temp_file) if os.path.isfile(temp_file) else 0
-            _log_update(f"Download concluido com sucesso! Tamanho no disco: {downloaded_bytes} bytes")
+                with opener.open(req, timeout=35) as resp, open(temp_file, "wb") as out_file:
+                    cur_size = total_size
+                    if cur_size <= 0:
+                        cur_size = int(resp.headers.get("Content-Length", 0))
 
-            self.after(0, lambda: (
-                self._download_gif.stop() if hasattr(self, '_download_gif') else None,
-                self._download_status_lbl.configure(
-                    text="✅ Download concluído! Reiniciando sistema...",
-                    text_color=COR_VERDE
-                )
-            ))
-            time.sleep(1)
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        out_file.write(chunk)
+                        downloaded += len(chunk)
 
-        except Exception as exc:
-            _log_update(f"ERRO durante o download: {exc}")
-            self.after(0, lambda e=exc: (
+                        if cur_size > 0:
+                            prog = min(1.0, downloaded / cur_size)
+                            mb_down = downloaded / (1024 * 1024)
+                            mb_total = cur_size / (1024 * 1024)
+                            percent = int(prog * 100)
+
+                            self.after(0, lambda p=prog, pct=percent, md=mb_down, mt=mb_total: (
+                                self._progress_bar.set(p),
+                                self._progress_detail_lbl.configure(text=f"{pct}% ({md:.1f} MB / {mt:.1f} MB)")
+                            ))
+
+                downloaded_bytes = os.path.getsize(temp_file) if os.path.isfile(temp_file) else 0
+                if downloaded_bytes > 0 and (cur_size <= 0 or downloaded_bytes >= cur_size * 0.95):
+                    _log_update(f"Download concluido com sucesso na tentativa {tentativa}! Tamanho no disco: {downloaded_bytes} bytes")
+                    sucesso = True
+                    break
+                else:
+                    raise IOError(f"Arquivo recebido incompleto ({downloaded_bytes}/{cur_size} bytes)")
+
+            except Exception as exc:
+                ultimo_erro = exc
+                _log_update(f"Falha na tentativa {tentativa}/{max_tentativas}: {exc}")
+                if os.path.isfile(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except Exception:
+                        pass
+                if tentativa < max_tentativas:
+                    time.sleep(2)  # Intervalo de 2 segundos antes de tentar novamente
+
+        if not sucesso:
+            _log_update(f"ERRO definitivo durante o download apos {max_tentativas} tentativas: {ultimo_erro}")
+            self.after(0, lambda e=ultimo_erro: (
                 self._download_gif.stop() if hasattr(self, '_download_gif') else None,
                 self._download_status_lbl.configure(
                     text=f"❌ Erro ao baixar atualização: {str(e)[:45]}",
@@ -409,6 +482,17 @@ class UpdateDialog(ctk.CTkToplevel):
                 self._btn_depois.configure(state="normal", text="Fechar")
             ))
             return
+
+        self.after(0, lambda: (
+            self._download_gif.stop() if hasattr(self, '_download_gif') else None,
+            self._progress_bar.set(1.0),
+            self._progress_detail_lbl.configure(text=f"100% ({downloaded_bytes / (1024*1024):.1f} MB)"),
+            self._download_status_lbl.configure(
+                text="✅ Download concluído! Reiniciando sistema...",
+                text_color=COR_VERDE
+            )
+        ))
+        time.sleep(1)
 
         # 4. Executar instalador de atualização e reiniciar
         if getattr(sys, "frozen", False):
@@ -537,13 +621,15 @@ def fetch_latest_release(owner: str = GITHUB_OWNER, repo: str = GITHUB_REPO, tim
     Retorna os dados em dict ou None caso ocorra qualquer erro de rede/timeout.
     """
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": f"PointLanches-Updater/{__version__}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-    )
+    headers = {
+        "User-Agent": "PointLanches-Updater",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    token = _get_github_token()
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    req = urllib.request.Request(url, headers=headers)
 
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context()) as resp:
