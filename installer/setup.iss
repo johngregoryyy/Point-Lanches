@@ -2,7 +2,7 @@
 ; =============================================================================
 
 #define MyAppName "Point Lanches"
-#define MyAppVersion "1.0.9"
+#define MyAppVersion "1.0.10"
 #define MyAppPublisher "Point Lanches"
 #define MyAppURL "https://github.com/johngregoryyy/Point-Lanches"
 #define MyAppExeName "PointLanches.exe"

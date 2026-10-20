@@ -276,7 +276,7 @@ class ScreenBalanco(ctk.CTkToplevel):
         ctk.CTkLabel(r_th, text="Pos.", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=(12, 4), sticky="w")
         ctk.CTkLabel(r_th, text="Produto do Cardápio", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=8, sticky="w")
         ctk.CTkLabel(r_th, text="Categoria", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=8, sticky="w")
-        ctk.CTkLabel(r_th, text="Qtd. Vendida", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=8, sticky="center")
+        ctk.CTkLabel(r_th, text="Qtd. Vendida", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=8)
         ctk.CTkLabel(r_th, text="Total Faturado (R$)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=4, padx=8, sticky="e")
         ctk.CTkLabel(r_th, text="Part. (%)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=5, padx=(8, 12), sticky="e")
 
@@ -578,7 +578,7 @@ class ScreenBalanco(ctk.CTkToplevel):
                 font=ctk.CTkFont(size=12, weight="bold"),
                 text_color=COR_AZUL_POINT,
                 anchor="center"
-            ).grid(row=0, column=3, padx=8, sticky="center")
+            ).grid(row=0, column=3, padx=8)
 
             val_prod_fmt = f"R$ {p['total_valor']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             ctk.CTkLabel(

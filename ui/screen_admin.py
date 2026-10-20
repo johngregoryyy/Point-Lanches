@@ -205,21 +205,23 @@ class ScreenAdmin(ctk.CTkToplevel):
                 self._loading_timers.append(tid)
 
     def _finalizar_carregamento_ajustes(self):
-        """Oculta o overlay e recarrega os dados nos campos e tabelas."""
+        """Oculta o overlay e recarrega os dados nos campos e tabelas de forma independente e segura."""
         if hasattr(self, "_overlay") and self.winfo_exists():
             self._overlay.hide()
-            try:
-                self._carregar_produtos()
-                if hasattr(self, "_carregar_categorias_tab"):
-                    self._carregar_categorias_tab()
-                self._carregar_adicionais()
-                self._carregar_taxas()
-                if hasattr(self, "_carregar_obs"):
-                    self._carregar_obs()
-                if hasattr(self, "_carregar_config"):
-                    self._carregar_config()
-            except Exception:
-                pass
+            loaders = [
+                ("_carregar_produtos", self._carregar_produtos),
+                ("_carregar_categorias_tab", getattr(self, "_carregar_categorias_tab", None)),
+                ("_carregar_adicionais", self._carregar_adicionais),
+                ("_carregar_taxas", self._carregar_taxas),
+                ("_carregar_obs", getattr(self, "_carregar_obs", None)),
+                ("_carregar_config", getattr(self, "_carregar_config", None)),
+            ]
+            for nome, fn in loaders:
+                if fn and callable(fn):
+                    try:
+                        fn()
+                    except Exception as e:
+                        print(f"Erro ao carregar dados na rotina {nome}: {e}")
         if hasattr(self, "_on_ready") and callable(self._on_ready):
             try:
                 self._on_ready()
@@ -307,7 +309,9 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         ctk.CTkLabel(form, text="Categoria", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         cats = [c["nome"] for c in listar_categorias()]
-        self._f_cat_var = ctk.StringVar(value=cats[0] if cats else "")
+        if not cats:
+            cats = ["Geral"]
+        self._f_cat_var = ctk.StringVar(value=cats[0] if cats else "Geral")
         self._f_cat = ctk.CTkComboBox(form, values=cats, variable=self._f_cat_var, height=36, font=ctk.CTkFont(size=13))
         self._f_cat.pack(fill="x", padx=14, pady=(2, 14))
 
@@ -348,8 +352,10 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         produtos = listar_produtos()
         categorias_db = listar_categorias(incluir_extras=True)
-        cat_nomes = [c["nome"] for c in categorias_db]
-        cat_map = {c["nome"]: c["id"] for c in categorias_db}
+        cat_nomes = [c["nome"] for c in categorias_db] if categorias_db else ["Geral"]
+        if not cat_nomes:
+            cat_nomes = ["Geral"]
+        cat_map = {c["nome"]: c["id"] for c in categorias_db} if categorias_db else {}
 
         for i, prod in enumerate(produtos):
             bg = "#272727" if i % 2 == 0 else "#222222"
@@ -546,7 +552,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         header.columnconfigure(2, weight=1, minsize=140)
         header.columnconfigure(3, weight=0, minsize=50)
 
-        ctk.CTkLabel(header, text="Ordem", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6, sticky="center")
+        ctk.CTkLabel(header, text="Ordem", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6)
         ctk.CTkLabel(header, text="Nome da Categoria (clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, pady=6, sticky="w")
         ctk.CTkLabel(header, text="Produtos Vinculados", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=6, pady=6, sticky="w")
         ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(4, 8), pady=6, sticky="e")
@@ -627,7 +633,7 @@ class ScreenAdmin(ctk.CTkToplevel):
                 justify="center"
             )
             entry_ordem.insert(0, str(cat.get("ordem", 0)))
-            entry_ordem.grid(row=0, column=0, padx=6, pady=4, sticky="center")
+            entry_ordem.grid(row=0, column=0, padx=6, pady=4)
 
             def _ao_mudar_ordem(event, c=cat, w=entry_ordem):
                 val_raw = w.get().strip()

@@ -218,11 +218,18 @@ def init_db():
 
 def listar_categorias(incluir_extras=False):
     with get_connection() as conn:
+        try:
+            conn.execute("ALTER TABLE categorias ADD COLUMN ordem INTEGER DEFAULT 0")
+        except Exception:
+            pass
         q = "SELECT * FROM categorias"
         if not incluir_extras:
             q += " WHERE LOWER(nome) != 'extras'"
-        q += " ORDER BY ordem, id"
-        return [dict(r) for r in conn.execute(q).fetchall()]
+        try:
+            q_order = q + " ORDER BY ordem, id"
+            return [dict(r) for r in conn.execute(q_order).fetchall()]
+        except sqlite3.OperationalError:
+            return [dict(r) for r in conn.execute(q + " ORDER BY id").fetchall()]
 
 
 def listar_produtos(categoria_id=None):
@@ -537,14 +544,18 @@ def ranking_produtos_vendidos(mes: int = None, ano: int = None) -> list[dict]:
         q = """
             SELECT 
                 ip.nome as produto_nome,
-                COALESCE(c.nome, ip.categoria, 'Diversos') as categoria_nome,
+                CASE 
+                    WHEN c.nome IS NOT NULL AND c.nome != '' THEN c.nome
+                    WHEN ip.categoria IS NOT NULL AND ip.categoria != '' THEN ip.categoria
+                    ELSE 'Lanches'
+                END as categoria_nome,
                 SUM(ip.quantidade) as total_qtd,
                 SUM(ip.quantidade * ip.preco_unit) as total_valor
             FROM itens_pedido ip
             JOIN pedidos p ON ip.pedido_id = p.id
-            LEFT JOIN produtos prod ON ip.produto_id = prod.id
+            LEFT JOIN produtos prod ON (ip.produto_id = prod.id OR LOWER(ip.nome) = LOWER(prod.nome))
             LEFT JOIN categorias c ON prod.categoria_id = c.id
-            WHERE p.criado_em LIKE ?
+            WHERE p.criado_em LIKE ? AND (p.status IS NULL OR p.status != 'cancelado')
             GROUP BY ip.nome
             ORDER BY total_qtd DESC, total_valor DESC
         """
