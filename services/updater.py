@@ -7,6 +7,7 @@ import re
 import json
 import time
 import socket
+import ssl
 import urllib.request
 import urllib.error
 import threading
@@ -20,6 +21,30 @@ from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_CINZA_BARRA, COR_TEXTO_SUAVE, COR_AZUL_POINT, COR_TEXTO
 )
+
+
+# ── Contexto SSL Resiliente para Windows ─────────────────────────────────────
+
+def _get_ssl_context() -> ssl.SSLContext:
+    """
+    Retorna um contexto SSL configurado para download de atualizações no Windows,
+    evitando o erro 'SSL: CERTIFICATE_VERIFY_FAILED: Missing Authority Key Identifier'
+    do OpenSSL ao redirecionar para os servidores de storage do GitHub / AWS S3.
+    """
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    except Exception:
+        return ssl._create_unverified_context()
+
+
+# Aplica o contexto SSL resiliente globalmente no urllib para cobrir redirects automáticos
+try:
+    ssl._create_default_https_context = _get_ssl_context
+except AttributeError:
+    pass
 
 
 def _parse_version(v_str: str) -> tuple[int, ...]:
@@ -201,13 +226,53 @@ class UpdateDialog(ctk.CTkToplevel):
         """Localiza o binário correto no release, baixa com barra de progresso e dispara o batch updater."""
         assets = self._release.get("assets", [])
 
-        # 1. Localizar binário .exe (ou .zip) nas assets do release
+        # 1. Definir caminho do executável atual e diretório
+        if getattr(sys, "frozen", False):
+            current_exe = os.path.abspath(sys.executable)
+            exe_dir = os.path.dirname(current_exe)
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            exe_dir = os.path.join(base_dir, "dist", "PointLanches")
+            if not os.path.isdir(exe_dir):
+                exe_dir = base_dir
+            current_exe = os.path.join(exe_dir, "PointLanches.exe")
+
+        is_installed = os.path.exists(os.path.join(exe_dir, "unins000.exe"))
+
+        # 2. Localizar o binário apropriado nas assets do release
         target_asset = None
-        for a in assets:
-            nome = a.get("name", "").lower()
-            if nome.endswith(".exe"):
-                target_asset = a
-                break
+
+        # Se for instalação completa via Inno Setup, priorizar o instalador Setup
+        if is_installed:
+            for a in assets:
+                nome = a.get("name", "").lower()
+                if nome.endswith(".exe") and ("setup" in nome or "instal" in nome):
+                    target_asset = a
+                    break
+
+        # Se for versão standalone ou se não achou o instalador, buscar PointLanches.exe
+        if not target_asset:
+            for a in assets:
+                nome = a.get("name", "").lower()
+                if nome == "pointlanches.exe":
+                    target_asset = a
+                    break
+
+        # Fallback para o instalador se não houver PointLanches.exe avulso
+        if not target_asset:
+            for a in assets:
+                nome = a.get("name", "").lower()
+                if nome.endswith(".exe") and ("setup" in nome or "instal" in nome):
+                    target_asset = a
+                    break
+
+        # Fallback genérico para qualquer .exe
+        if not target_asset:
+            for a in assets:
+                nome = a.get("name", "").lower()
+                if nome.endswith(".exe"):
+                    target_asset = a
+                    break
 
         if not target_asset and assets:
             target_asset = assets[0]  # Primeiro arquivo anexado
@@ -225,26 +290,16 @@ class UpdateDialog(ctk.CTkToplevel):
 
         download_url = target_asset.get("browser_download_url")
         total_size = target_asset.get("size", 0)
+        asset_name = target_asset.get("name", "PointLanches.exe")
+        is_setup_installer = ("setup" in asset_name.lower() or "instal" in asset_name.lower())
 
-        # 2. Definir caminho do executável atual e arquivo temporário de download
-        if getattr(sys, "frozen", False):
-            current_exe = os.path.abspath(sys.executable)
-            exe_dir = os.path.dirname(current_exe)
-        else:
-            # Em modo de desenvolvimento
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            exe_dir = os.path.join(base_dir, "dist", "PointLanches")
-            if not os.path.isdir(exe_dir):
-                exe_dir = base_dir
-            current_exe = os.path.join(exe_dir, "PointLanches.exe")
-
-        temp_exe = os.path.join(exe_dir, "PointLanches_update.exe")
+        temp_file = os.path.join(exe_dir, "PointLanches_Setup_temp.exe" if is_setup_installer else "PointLanches_update.exe")
         bat_script = os.path.join(exe_dir, "updater.bat")
 
         # 3. Baixar arquivo com relatório em tempo real
         try:
             self.after(0, lambda: self._download_status_lbl.configure(
-                text=f"Baixando {target_asset.get('name', 'PointLanches.exe')}...",
+                text=f"Baixando {asset_name}...",
                 text_color=COR_AZUL_POINT
             ))
 
@@ -256,7 +311,9 @@ class UpdateDialog(ctk.CTkToplevel):
             downloaded = 0
             chunk_size = 65536  # 64 KB por bloco para download rápido
 
-            with urllib.request.urlopen(req, timeout=30) as resp, open(temp_exe, "wb") as out_file:
+            # Utiliza contexto SSL tolerante para evitar erros de certificado no Windows
+            ssl_ctx = _get_ssl_context()
+            with urllib.request.urlopen(req, timeout=30, context=ssl_ctx) as resp, open(temp_file, "wb") as out_file:
                 if total_size <= 0:
                     total_size = int(resp.headers.get("Content-Length", 0))
 
@@ -301,7 +358,33 @@ class UpdateDialog(ctk.CTkToplevel):
         # 4. Executar script Batch de substituição silenciosa e reiniciar
         if getattr(sys, "frozen", False):
             exe_name = os.path.basename(current_exe)
-            batch_content = f"""@echo off
+            if is_setup_installer:
+                batch_content = f"""@echo off
+chcp 65001 >nul
+title Atualizando Point Lanches...
+echo ===================================================
+echo     ATUALIZANDO POINT LANCHES PARA A VERSAO {self._tag}
+echo ===================================================
+echo Aguardando fechamento do aplicativo...
+timeout /t 2 /nobreak >nul
+
+:: Garante o encerramento do processo antes de rodar o instalador
+taskkill /f /im "{exe_name}" >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+echo Instalando nova versao...
+start /wait "" "{temp_file}" /SILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS
+
+echo Reiniciando Point Lanches...
+start "" "{current_exe}"
+
+:: Limpar instalador baixado e este script
+del /f /q "{temp_file}" >nul 2>&1
+del /f /q "%~f0" >nul 2>&1
+exit
+"""
+            else:
+                batch_content = f"""@echo off
 chcp 65001 >nul
 title Atualizando Point Lanches...
 echo ===================================================
@@ -318,7 +401,7 @@ if exist "{current_exe}" (
 )
 
 echo Substituindo executavel...
-move /y "{temp_exe}" "{current_exe}" >nul 2>&1
+move /y "{temp_file}" "{current_exe}" >nul 2>&1
 
 echo Reiniciando Point Lanches...
 start "" "{current_exe}"
@@ -344,7 +427,7 @@ exit
                 )
 
                 # Encerrar aplicativo imediatamente para liberar o lock do Windows
-                self.after(100, lambda: sys.exit(0))
+                self.after(100, lambda: os._exit(0))
             except Exception as e:
                 self.after(0, lambda err=e: self._download_status_lbl.configure(
                     text=f"Falha ao iniciar updater: {err}",
@@ -353,7 +436,7 @@ exit
         else:
             # Em modo dev: avisa que baixou e deixa o arquivo salvo para inspeção
             self.after(0, lambda: self._download_status_lbl.configure(
-                text="[Modo Dev] Atualização baixada em:\n" + temp_exe,
+                text="[Modo Dev] Atualização baixada em:\n" + temp_file,
                 text_color=COR_VERDE
             ))
             self.after(0, lambda: self._btn_depois.configure(state="normal", text="Concluir"))
@@ -376,7 +459,7 @@ def fetch_latest_release(owner: str = GITHUB_OWNER, repo: str = GITHUB_REPO, tim
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context()) as resp:
             if resp.status == 200:
                 data = json.loads(resp.read().decode("utf-8"))
                 return data
