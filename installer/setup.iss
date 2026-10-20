@@ -60,42 +60,141 @@ Type: files; Name: "{app}\*.bat"
 Type: files; Name: "{app}\*temp*.exe"
 
 [Code]
-// Procedimento de limpeza profunda da versão anterior antes da instalação
-// Preserva estritamente o banco de dados (point_lanches.db) e logs de desinstalação
-procedure CurStepChanged(CurStep: TSetupStep);
 var
+  BackupDbFile, BackupWalFile, BackupShmFile: String;
+
+function GetFileSizeBytes(const FileName: String): Int64;
+var
+  Sz: Int64;
+begin
+  if FileSize64(FileName, Sz) then
+    Result := Sz
+  else
+    Result := 0;
+end;
+
+procedure BackupDatabase;
+var
+  AppDir, LocalDataDir, SourceDbFile: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  LocalDataDir := ExpandConstant('{localappdata}\PointLanches\data');
+  BackupDbFile := ExpandConstant('{tmp}\point_lanches_backup.db');
+  BackupWalFile := ExpandConstant('{tmp}\point_lanches_backup.db-wal');
+  BackupShmFile := ExpandConstant('{tmp}\point_lanches_backup.db-shm');
+
+  // Localizar o banco de dados existente com dados válidos
+  if FileExists(AppDir + '\point_lanches.db') and (GetFileSizeBytes(AppDir + '\point_lanches.db') > 0) then
+    SourceDbFile := AppDir + '\point_lanches.db'
+  else if FileExists(LocalDataDir + '\point_lanches.db') and (GetFileSizeBytes(LocalDataDir + '\point_lanches.db') > 0) then
+    SourceDbFile := LocalDataDir + '\point_lanches.db'
+  else if FileExists(ExpandConstant('{localappdata}\Point Lanches\point_lanches.db')) then
+    SourceDbFile := ExpandConstant('{localappdata}\Point Lanches\point_lanches.db')
+  else
+    SourceDbFile := '';
+
+  if SourceDbFile <> '' then
+  begin
+    CopyFile(SourceDbFile, BackupDbFile, False);
+    CopyFile(SourceDbFile, ExpandConstant('{userappdata}\..\Local\Temp\point_lanches_safe_backup.db'), False);
+
+    if FileExists(SourceDbFile + '-wal') then
+      CopyFile(SourceDbFile + '-wal', BackupWalFile, False);
+    if FileExists(SourceDbFile + '-shm') then
+      CopyFile(SourceDbFile + '-shm', BackupShmFile, False);
+  end;
+end;
+
+procedure DeleteOldShortcuts;
+begin
+  // Remove todos os atalhos antigos duplicados no Menu Iniciar e Desktop (tanto de usuário quanto públicos)
+  DeleteFile(ExpandConstant('{userdesktop}\Point Lanches.lnk'));
+  DeleteFile(ExpandConstant('{commondesktop}\Point Lanches.lnk'));
+  DeleteFile(ExpandConstant('{userprograms}\Point Lanches.lnk'));
+  DeleteFile(ExpandConstant('{commonprograms}\Point Lanches.lnk'));
+  DelTree(ExpandConstant('{userprograms}\Point Lanches'), True, True, True);
+  DelTree(ExpandConstant('{commonprograms}\Point Lanches'), True, True, True);
+end;
+
+procedure WipeAppDir;
+var
+  AppDir: String;
   FindRec: TFindRec;
-  AppDir, ItemPath, FileName, Ext: String;
+  ItemPath, FileName: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  if DirExists(AppDir) then
+  begin
+    if FindFirst(AppDir + '\*', FindRec) then
+    begin
+      try
+        repeat
+          FileName := FindRec.Name;
+          // Preserva apenas os arquivos de controle do uninstaller para integridade do Windows
+          if (FileName <> '.') and (FileName <> '..') and (Pos('unins', Lowercase(FileName)) <> 1) then
+          begin
+            ItemPath := AppDir + '\' + FileName;
+            if FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
+              DelTree(ItemPath, True, True, True)
+            else
+              DeleteFile(ItemPath);
+          end;
+        until not FindNext(FindRec);
+      finally
+        FindClose(FindRec);
+      end;
+    end;
+  end;
+end;
+
+procedure RestoreDatabase;
+var
+  AppDir, LocalDataDir, SafeBackup: String;
+begin
+  SafeBackup := ExpandConstant('{userappdata}\..\Local\Temp\point_lanches_safe_backup.db');
+  if (not FileExists(BackupDbFile)) or (GetFileSizeBytes(BackupDbFile) = 0) then
+  begin
+    if FileExists(SafeBackup) and (GetFileSizeBytes(SafeBackup) > 0) then
+      BackupDbFile := SafeBackup;
+  end;
+
+  if FileExists(BackupDbFile) and (GetFileSizeBytes(BackupDbFile) > 0) then
+  begin
+    AppDir := ExpandConstant('{app}');
+    LocalDataDir := ExpandConstant('{localappdata}\PointLanches\data');
+    ForceDirectories(LocalDataDir);
+
+    // 1. Substituir o banco na pasta da aplicação pelo banco do backup
+    CopyFile(BackupDbFile, AppDir + '\point_lanches.db', False);
+    if FileExists(BackupWalFile) then
+      CopyFile(BackupWalFile, AppDir + '\point_lanches.db-wal', False);
+    if FileExists(BackupShmFile) then
+      CopyFile(BackupShmFile, AppDir + '\point_lanches.db-shm', False);
+
+    // 2. Substituir o banco na pasta persistente LocalAppData
+    CopyFile(BackupDbFile, LocalDataDir + '\point_lanches.db', False);
+    if FileExists(BackupWalFile) then
+      CopyFile(BackupWalFile, LocalDataDir + '\point_lanches.db-wal', False);
+    if FileExists(BackupShmFile) then
+      CopyFile(BackupShmFile, LocalDataDir + '\point_lanches.db-shm', False);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
   begin
-    AppDir := ExpandConstant('{app}');
-    if DirExists(AppDir) then
-    begin
-      if FindFirst(AppDir + '\*', FindRec) then
-      begin
-        try
-          repeat
-            FileName := FindRec.Name;
-            if (FileName <> '.') and (FileName <> '..') then
-            begin
-              Ext := Lowercase(ExtractFileExt(FileName));
-              // Blindagem: NUNCA remover o banco de dados SQLite nem arquivos wal/shm
-              if (Ext <> '.db') and (Ext <> '.db-wal') and (Ext <> '.db-shm') and (Pos('unins', Lowercase(FileName)) <> 1) then
-              begin
-                ItemPath := AppDir + '\' + FileName;
-                if FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
-                  DelTree(ItemPath, True, True, True)
-                else
-                  DeleteFile(ItemPath);
-              end;
-            end;
-          until not FindNext(FindRec);
-        finally
-          FindClose(FindRec);
-        end;
-      end;
-    end;
+    // 1. Fazer backup do banco para pasta temporária
+    BackupDatabase;
+    // 2. Apagar atalhos antigos do Menu Iniciar e Desktop
+    DeleteOldShortcuts;
+    // 3. Limpar completamente os arquivos da versão anterior
+    WipeAppDir;
+  end
+  else if CurStep = ssPostInstall then
+  begin
+    // 4. Restaurar o banco de dados do backup substituindo o padrão
+    RestoreDatabase;
   end;
 end;
 
