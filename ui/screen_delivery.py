@@ -3,12 +3,14 @@ import unicodedata
 import customtkinter as ctk
 from database.db import (
     listar_taxas, listar_ruas,
-    registrar_callback_ruas_modificadas, desregistrar_callback_ruas_modificadas
+    registrar_callback_ruas_modificadas, desregistrar_callback_ruas_modificadas,
+    obter_historico_endereco
 )
 from ui.components.widgets import TopBar, ChipButton, habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_CINZA_BARRA, COR_FUNDO, COR_TEXTO, COR_TEXTO_SUAVE,
+    COR_AZUL_POINT,
     RUAS_DOIS_IRMAOS, BAIRROS_DOIS_IRMAOS, TAXAS_RAPIDAS
 )
 
@@ -108,6 +110,7 @@ class ScreenDelivery(ctk.CTkFrame):
 
         self._rua_botoes: list[tuple[str, ctk.CTkButton]] = []
         self._debounce_id = None
+        self._hist_debounce_id = None
         self._taxa_chips: list[ChipButton] = []
         self._bairro_chips: list[ChipButton] = []
 
@@ -215,7 +218,9 @@ class ScreenDelivery(ctk.CTkFrame):
         f_num = ctk.CTkFrame(end_detalhe, fg_color="transparent")
         f_num.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ctk.CTkLabel(f_num, text="Número", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w")
-        ctk.CTkEntry(f_num, textvariable=self._num_var, placeholder_text="123", height=34, font=ctk.CTkFont(size=13)).pack(fill="x", pady=(2, 0))
+        self._num_entry = ctk.CTkEntry(f_num, textvariable=self._num_var, placeholder_text="123", height=34, font=ctk.CTkFont(size=13))
+        self._num_entry.pack(fill="x", pady=(2, 0))
+        self._num_var.trace_add("write", self._on_num_change_debounce)
 
         f_comp = ctk.CTkFrame(end_detalhe, fg_color="transparent")
         f_comp.grid(row=0, column=1, sticky="ew", padx=4)
@@ -264,11 +269,18 @@ class ScreenDelivery(ctk.CTkFrame):
         self._taxa_entry.pack(side="left")
         self._taxa_var.trace_add("write", self._on_taxa_change)
 
+        # Feedback visual de taxa memorizada por endereço (Rua + Número)
+        self._hist_taxa_lbl = ctk.CTkLabel(
+            right, text="", font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=COR_AZUL_POINT, anchor="w", justify="left"
+        )
+        self._hist_taxa_lbl.grid(row=3, column=0, sticky="w", padx=14, pady=(0, 4))
+
         # ── Resumo do Pedido ──
-        self._secao(right, "📋  RESUMO DO PEDIDO", row=3)
+        self._secao(right, "📋  RESUMO DO PEDIDO", row=4)
 
         resumo_card = ctk.CTkFrame(right, fg_color="#1E1E1E", corner_radius=10)
-        resumo_card.grid(row=4, column=0, sticky="ew", padx=12, pady=4)
+        resumo_card.grid(row=5, column=0, sticky="ew", padx=12, pady=4)
         resumo_card.columnconfigure(0, weight=1)
 
         self._sub_lbl = ctk.CTkLabel(resumo_card, text="Subtotal:      R$ 0,00", font=ctk.CTkFont(size=13), anchor="w")
@@ -422,7 +434,13 @@ class ScreenDelivery(ctk.CTkFrame):
                 text_color="#FFFFFF" if is_match else "#DDDDDD"
             )
 
-        # Sugestão automática de bairro e taxa associados à via se disponíveis
+        # 1. Se o número já estiver preenchido, prioriza a busca no histórico exato (Rua + Número)
+        num_atual = self._num_var.get().strip()
+        if num_atual:
+            self._consultar_e_aplicar_historico_endereco()
+            return
+
+        # 2. Caso contrário, aplica sugestão padrão associada à via se disponível
         rua_info = getattr(self, "_ruas_map", {}).get(rua)
         if rua_info:
             bairro_rua = rua_info.get("bairro")
@@ -437,6 +455,44 @@ class ScreenDelivery(ctk.CTkFrame):
                     taxa_atual = 0.0
                 if taxa_atual == 0.0:
                     self._selecionar_taxa(taxa_rua)
+
+    def _on_num_change_debounce(self, *_):
+        """Debounce de 200ms para consulta automática de histórico de frete ao digitar número."""
+        if hasattr(self, "_hist_debounce_id") and self._hist_debounce_id:
+            self.after_cancel(self._hist_debounce_id)
+        self._hist_debounce_id = self.after(200, self._consultar_e_aplicar_historico_endereco)
+
+    def _consultar_e_aplicar_historico_endereco(self):
+        """Consulta o banco de dados para recuperar o frete e bairro praticados anteriormente."""
+        self._hist_debounce_id = None
+        rua = self._rua_var.get().strip()
+        num = self._num_var.get().strip()
+
+        if not rua or not num:
+            if hasattr(self, "_hist_taxa_lbl"):
+                self._hist_taxa_lbl.configure(text="")
+            return
+
+        try:
+            hist = obter_historico_endereco(rua, num)
+        except Exception:
+            hist = None
+
+        if hist:
+            taxa_hist = float(hist.get("taxa_frete") or 0.0)
+            bairro_hist = hist.get("bairro")
+            if bairro_hist and not self._bairro_sel.get():
+                self._selecionar_bairro(bairro_hist)
+
+            self._selecionar_taxa(taxa_hist)
+            if hasattr(self, "_hist_taxa_lbl"):
+                taxa_fmt = f"R$ {taxa_hist:.2f}".replace(".", ",")
+                self._hist_taxa_lbl.configure(
+                    text=f"💡 Histórico do endereço (nº {num}): {taxa_fmt}"
+                )
+        else:
+            if hasattr(self, "_hist_taxa_lbl"):
+                self._hist_taxa_lbl.configure(text="")
 
     def _selecionar_bairro(self, bairro: str, selecionado: bool = True):
         if selecionado:
@@ -534,6 +590,8 @@ class ScreenDelivery(ctk.CTkFrame):
             chip.set_selected(False)
         for chip in self._taxa_chips:
             chip.set_selected(False)
+        if hasattr(self, "_hist_taxa_lbl"):
+            self._hist_taxa_lbl.configure(text="")
         self._carregar_ruas()
         self._renderizar_grid_ruas(self._ruas_todas[:30])
 

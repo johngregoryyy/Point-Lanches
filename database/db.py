@@ -203,7 +203,31 @@ def init_db():
                 valor_total REAL NOT NULL,
                 data        TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS historico_enderecos (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                rua           TEXT NOT NULL COLLATE NOCASE,
+                numero        TEXT NOT NULL COLLATE NOCASE,
+                bairro        TEXT DEFAULT '',
+                taxa_frete    REAL NOT NULL DEFAULT 0.0,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(rua, numero)
+            );
         """)
+
+        # Migração: popular historico_enderecos a partir de pedidos anteriores se vazia
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM historico_enderecos").fetchone()[0]
+            if count == 0:
+                conn.execute("""
+                    INSERT OR IGNORE INTO historico_enderecos (rua, numero, bairro, taxa_frete, atualizado_em)
+                    SELECT endereco_rua, endereco_num, endereco_bairro, taxa_entrega, criado_em
+                    FROM pedidos
+                    WHERE endereco_rua != '' AND endereco_num != '' AND taxa_entrega > 0
+                    ORDER BY id ASC
+                """)
+        except Exception:
+            pass
 
         # Migrações seguras (ignoram erro se coluna já existe)
         for sql in [
@@ -406,6 +430,19 @@ def salvar_pedido(pedido: dict, itens: list) -> int:
             if rua_info and rua_info.get("nome"):
                 # Padroniza a via no pedido e no cupom com formatação Title Case e acentos
                 pedido["rua"] = rua_info["nome"]
+        except Exception:
+            pass
+
+    # ── Gravação/Atualização no Histórico de Endereço (Rua + Número) ──
+    num_raw = (pedido.get("numero") or "").strip()
+    if rua_raw and num_raw:
+        try:
+            salvar_historico_endereco(
+                rua=pedido.get("rua", rua_raw),
+                numero=num_raw,
+                bairro=bairro,
+                taxa_frete=taxa
+            )
         except Exception:
             pass
 
@@ -1016,6 +1053,106 @@ def remover_rua(rua_id: int):
     _notificar_ruas_modificadas()
 
 
+# ── Histórico Inteligente de Taxas por Endereço (Rua + Número) ────────────────
+
+def _remover_prefixo_generico(norm_rua: str) -> str:
+    """Descarta prefixos genéricos de via ('rua', 'av') para matching tolerante."""
+    parts = norm_rua.split()
+    if parts and parts[0] in ('rua', 'av', 'estrada', 'travessa', 'alameda', 'rodovia', 'beco'):
+        return " ".join(parts[1:])
+    return norm_rua
+
+
+def obter_historico_endereco(rua: str, numero: str) -> dict | None:
+    """
+    Busca o histórico de taxa e bairro para a combinação exata de Rua + Número.
+    Utiliza correspondência direta (COLLATE NOCASE), Title Case e normalização de via.
+    """
+    rua_clean = (rua or "").strip()
+    num_clean = (numero or "").strip()
+    if not rua_clean or not num_clean:
+        return None
+
+    with get_connection() as conn:
+        # 1. Busca direta (case-insensitive via COLLATE NOCASE)
+        row = conn.execute(
+            "SELECT * FROM historico_enderecos WHERE rua = ? AND numero = ? ORDER BY id DESC LIMIT 1",
+            (rua_clean, num_clean)
+        ).fetchone()
+        if row:
+            return dict(row)
+
+        # 2. Busca com Title Case formatado
+        rua_fmt = formatar_nome_rua(rua_clean)
+        if rua_fmt.lower() != rua_clean.lower():
+            row = conn.execute(
+                "SELECT * FROM historico_enderecos WHERE rua = ? AND numero = ? ORDER BY id DESC LIMIT 1",
+                (rua_fmt, num_clean)
+            ).fetchone()
+            if row:
+                return dict(row)
+
+        # 3. Busca por equivalência normalizada (sem acentos e tolerante a omissão de prefixo)
+        norm_busca = normalizar_rua_para_comparacao(rua_clean)
+        norm_busca_sem_pref = _remover_prefixo_generico(norm_busca)
+        rows = conn.execute(
+            "SELECT * FROM historico_enderecos WHERE numero = ? ORDER BY id DESC",
+            (num_clean,)
+        ).fetchall()
+        for r in rows:
+            norm_r = normalizar_rua_para_comparacao(r["rua"])
+            if norm_r == norm_busca or _remover_prefixo_generico(norm_r) == norm_busca_sem_pref:
+                return dict(r)
+
+    return None
+
+
+def salvar_historico_endereco(rua: str, numero: str, bairro: str = "", taxa_frete: float = 0.0):
+    """
+    Grava ou atualiza a taxa de frete e bairro cobrados para o endereço (Rua + Número).
+    Garante integridade e atualização de timestamp sem travar a interface.
+    """
+    rua_clean = formatar_nome_rua((rua or "").strip())
+    num_clean = (numero or "").strip()
+    bairro_clean = (bairro or "").strip()
+    try:
+        taxa_val = float(taxa_frete or 0.0)
+    except (ValueError, TypeError):
+        taxa_val = 0.0
+
+    if not rua_clean or not num_clean:
+        return
+
+    with get_connection() as conn:
+        norm_busca = normalizar_rua_para_comparacao(rua_clean)
+        norm_busca_sem_pref = _remover_prefixo_generico(norm_busca)
+        rows = conn.execute(
+            "SELECT id, rua FROM historico_enderecos WHERE numero = ?",
+            (num_clean,)
+        ).fetchall()
+        reg_id = None
+        for r in rows:
+            norm_r = normalizar_rua_para_comparacao(r["rua"])
+            if norm_r == norm_busca or _remover_prefixo_generico(norm_r) == norm_busca_sem_pref:
+                reg_id = r["id"]
+                break
+
+        if reg_id:
+            conn.execute(
+                """UPDATE historico_enderecos
+                   SET rua = ?, bairro = ?, taxa_frete = ?, atualizado_em = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (rua_clean, bairro_clean, taxa_val, reg_id)
+            )
+        else:
+            conn.execute(
+                """INSERT OR REPLACE INTO historico_enderecos
+                   (rua, numero, bairro, taxa_frete, atualizado_em)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (rua_clean, num_clean, bairro_clean, taxa_val)
+            )
+
+
 def importar_ruas_geojson(caminho: str = None) -> int:
     """
     Importa e saneia vias a partir de arquivo GeoJSON (OpenStreetMap/Overpass API).
@@ -1112,6 +1249,7 @@ def exportar_dados_json() -> dict:
         observacoes = [dict(r) for r in conn.execute("SELECT * FROM observacoes_padrao ORDER BY id").fetchall()]
         configuracoes = {r["chave"]: r["valor"] for r in conn.execute("SELECT * FROM configuracoes").fetchall()}
         ruas = [dict(r) for r in conn.execute("SELECT * FROM ruas ORDER BY nome").fetchall()]
+        historico_enderecos = [dict(r) for r in conn.execute("SELECT * FROM historico_enderecos ORDER BY id").fetchall()]
 
     return {
         "versao_schema": "1.0",
@@ -1124,6 +1262,7 @@ def exportar_dados_json() -> dict:
         "observacoes_padrao": observacoes,
         "configuracoes": configuracoes,
         "ruas": ruas,
+        "historico_enderecos": historico_enderecos,
     }
 
 
@@ -1236,6 +1375,19 @@ def importar_dados_json(dados: dict) -> tuple[bool, str]:
                             (r["nome"], r.get("bairro", ""), float(r.get("taxa") or 0.0), r.get("ativo", 1))
                         )
                 _notificar_ruas_modificadas()
+
+            # 8. Histórico de Endereços
+            if "historico_enderecos" in dados and isinstance(dados["historico_enderecos"], list):
+                for h in dados["historico_enderecos"]:
+                    if h.get("rua") and h.get("numero"):
+                        conn.execute("""
+                            INSERT OR REPLACE INTO historico_enderecos 
+                            (rua, numero, bairro, taxa_frete, atualizado_em)
+                            VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                        """, (
+                            h["rua"], h["numero"], h.get("bairro", ""),
+                            float(h.get("taxa_frete") or 0.0), h.get("atualizado_em")
+                        ))
 
         return True, "Configurações importadas e aplicadas com sucesso!"
     except Exception as e:

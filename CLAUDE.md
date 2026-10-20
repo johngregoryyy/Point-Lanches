@@ -215,6 +215,7 @@ def get_base_dir() -> str:
 - `itens_pedido`: ID, Pedido_ID, Produto_ID, Nome, Preço Unitário, Quantidade, Observação, Categoria
 - `observacoes_padrao`: ID, Texto da observação, Ativo (carregadas dinamicamente no modal de personalização)
 - `ruas`: ID, Nome, Bairro, Taxa, Ativo (base saneada via GeoJSON e enriquecida por auto-cadastro dinâmico de novas vias)
+- `historico_enderecos`: ID, Rua (NOCASE), Número (NOCASE), Bairro, Taxa_Frete, Atualizado_Em (histórico inteligente de taxa de entrega por endereço exato)
 - `insumos`: ID, Nome, Unidade de Medida, Custo Unitário, Estoque Atual, Ativo (preparação para custos e estoque futuros)
 - `movimentacoes_insumos`: ID, Insumo_ID, Tipo (entrada/saida/perda), Quantidade, Valor Total, Data
 - `configuracoes`: Chave-Valor (armazena tipo de impressora, IP e nome da impressora USB)
@@ -276,6 +277,11 @@ Sempre que fizer alterações no código Python:
   - O binário/instalador é baixado em segundo plano com barra de progresso em tempo real em `%TEMP%`.
   - Logs detalhados são registrados em `point_lanches_update.log` e `point_lanches_installer.log`.
   - Dispara processo desanexado (`updater.bat`) com auto-elevação UAC (`runas`), encerra o executável atual, executa a atualização silenciosa com `/DIR` explícito, reinicia o sistema atualizado e apaga os arquivos temporários.
+
+### 8.10. Histórico Inteligente de Frete por Endereço (Rua + Número)
+- Memoriza automaticamente a taxa de tele cobrada para a combinação exata de `Rua + Número` ao salvar o pedido (`salvar_pedido`).
+- Durante o preenchimento ou seleção de endereço na tela de entrega (`ScreenDelivery`), uma rotina com debounce de 200ms consulta a tabela `historico_enderecos` e auto-preenche a taxa praticada anteriormente (e o bairro se não selecionado), exibindo um feedback visual discreto.
+- Permite que o operador altere a taxa manualmente a qualquer momento, atualizando o histórico no fechamento do pedido sem burocracia.
 
 ---
 
