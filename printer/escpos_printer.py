@@ -109,10 +109,57 @@ def listar_impressoras_windows() -> list[str]:
         return ["Elgin i8", "POS-80", "Generic / Text Only"]
 
 
+def is_usb_printer_offline(hPrinter) -> tuple[bool, str]:
+    """
+    Verifica se a impressora no Windows Spooler está offline, desligada ou com erro.
+    Retorna (is_offline: bool, motivo: str).
+    """
+    try:
+        winspool = _get_winspool()
+        if not winspool:
+            return False, ""
+        needed = ctypes.wintypes.DWORD(0)
+        winspool.GetPrinterW(hPrinter, 2, None, 0, ctypes.byref(needed))
+        if needed.value == 0:
+            return False, ""
+        buf = ctypes.create_string_buffer(needed.value)
+        if not winspool.GetPrinterW(hPrinter, 2, buf, needed.value, ctypes.byref(needed)):
+            return False, ""
+
+        import struct
+        # Em Windows x64, PRINTER_INFO_2 possui 13 ponteiros (104 bytes) seguidos de 7 DWORDs
+        attrs, prio, def_prio, start_t, until_t, status, cjobs = struct.unpack_from('<7I', buf.raw, 104)
+
+        PRINTER_ATTRIBUTE_WORK_OFFLINE = 0x00000400
+        PRINTER_STATUS_OFFLINE         = 0x00000080
+        PRINTER_STATUS_ERROR           = 0x00000002
+        PRINTER_STATUS_NOT_AVAILABLE   = 0x00001000
+        PRINTER_STATUS_PAPER_OUT       = 0x00000010
+        PRINTER_STATUS_PAPER_JAM       = 0x00000008
+
+        if attrs & PRINTER_ATTRIBUTE_WORK_OFFLINE:
+            return True, "Impressora está definida como Offline no Windows (cabo USB desconectado ou impressora desligada)."
+        if status & PRINTER_STATUS_OFFLINE:
+            return True, "Impressora está offline (sem sinal de hardware USB)."
+        if status & PRINTER_STATUS_NOT_AVAILABLE:
+            return True, "Impressora não está disponível no sistema operacional."
+        if status & PRINTER_STATUS_ERROR:
+            return True, "Impressora reportou estado de erro no Windows."
+        if status & PRINTER_STATUS_PAPER_OUT:
+            return True, "A impressora está sem papel (bobina térmica vazia)."
+        if status & PRINTER_STATUS_PAPER_JAM:
+            return True, "Papel atolado na impressora."
+
+        return False, ""
+    except Exception:
+        return False, ""
+
+
 def send_to_usb_printer(printer_name: str, data: bytes) -> None:
     """
     Envia bytes ESC/POS diretamente para uma impressora USB no Windows Spooler.
     Suporta também portas seriais COM virtuais (ex: COM1, COM3).
+    Valida se o hardware está de fato conectado e online antes de enfileirar.
     """
     if not printer_name:
         raise PrinterError("Nome da impressora USB não informado.")
@@ -167,11 +214,19 @@ def send_to_usb_printer(printer_name: str, data: bytes) -> None:
     if not OpenPrinterW(printer_name, ctypes.byref(hPrinter), None):
         err = ctypes.GetLastError()
         raise PrinterError(
-            f"Impressora USB '{printer_name}' não encontrada ou desconectada (Código {err}).\n"
-            f"Verifique se o cabo USB está plugado e se o driver da Elgin i8 está instalado."
+            f"Impressora USB '{printer_name}' não encontrada no Windows (Código {err}).\n"
+            f"Verifique se o driver da Elgin i8 está instalado nas configurações de impressoras."
         )
 
     try:
+        offline, motivo = is_usb_printer_offline(hPrinter)
+        if offline:
+            raise PrinterError(
+                f"A impressora '{printer_name}' não está conectada ou está desligada.\n"
+                f"{motivo}\n\n"
+                f"Conecte o cabo USB ao computador e ligue a impressora antes de imprimir."
+            )
+
         doc_info = DOC_INFO_1(
             pDocName="Point Lanches - Pedido",
             pOutputFile=None,
@@ -201,7 +256,7 @@ def send_to_usb_printer(printer_name: str, data: bytes) -> None:
 
 
 def test_connection_usb(printer_name: str) -> bool:
-    """Testa se a impressora USB no Windows pode ser aberta."""
+    """Testa se a impressora USB no Windows pode ser aberta e está online."""
     if not printer_name:
         return False
     if printer_name.upper().startswith("COM"):
@@ -225,8 +280,11 @@ def test_connection_usb(printer_name: str) -> bool:
 
     hPrinter = ctypes.wintypes.HANDLE()
     if OpenPrinterW(printer_name, ctypes.byref(hPrinter), None):
-        ClosePrinter(hPrinter)
-        return True
+        try:
+            offline, _ = is_usb_printer_offline(hPrinter)
+            return not offline
+        finally:
+            ClosePrinter(hPrinter)
     return False
 
 
@@ -313,46 +371,56 @@ def imprimir_ticket(arg1, arg2=None, on_success=None, on_error=None) -> None:
     t.start()
 
 
-def show_printer_error_popup(parent, mensagem: str, retry_callback=None):
-    """Exibe pop-up amigável de erro de impressão com opção de retry."""
+def show_printer_error_popup(parent, mensagem: str, retry_callback=None, skip_callback=None):
+    """Exibe pop-up amigável de erro de impressão com opções de retry, concluir sem imprimir ou fechar."""
     win = ctk.CTkToplevel(parent)
     win.title("Erro de Impressão")
-    win.geometry("500x290")
+    win.geometry("520x290")
     win.grab_set()
     win.resizable(False, False)
 
     win.update_idletasks()
-    px = parent.winfo_rootx() + parent.winfo_width() // 2 - 250
+    px = parent.winfo_rootx() + parent.winfo_width() // 2 - 260
     py = parent.winfo_rooty() + parent.winfo_height() // 2 - 145
     win.geometry(f"+{max(0, px)}+{max(0, py)}")
 
     ctk.CTkLabel(
         win, text="⚠️  Falha na Impressora Elgin i8",
-        font=ctk.CTkFont(size=19, weight="bold")
-    ).pack(pady=(22, 6))
+        font=ctk.CTkFont(size=18, weight="bold"),
+        text_color="#EF4444"
+    ).pack(pady=(20, 4))
 
     ctk.CTkLabel(
         win, text=mensagem,
-        wraplength=440, justify="center",
+        wraplength=460, justify="center",
         font=ctk.CTkFont(size=12)
-    ).pack(pady=8, padx=20)
+    ).pack(pady=6, padx=20)
 
     btn_frame = ctk.CTkFrame(win, fg_color="transparent")
-    btn_frame.pack(pady=16, fill="x", padx=30)
+    btn_frame.pack(pady=16, fill="x", padx=20)
 
     if retry_callback:
         ctk.CTkButton(
             btn_frame, text="🔄  Tentar Novamente",
-            width=180, height=44,
+            height=42,
             fg_color="#0284C7", hover_color="#0369A1",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=lambda: [win.destroy(), retry_callback()]
-        ).pack(side="left", padx=8)
+        ).pack(side="left", padx=4, expand=True, fill="x")
+
+    if skip_callback:
+        ctk.CTkButton(
+            btn_frame, text="⏩  Concluir sem Imprimir",
+            height=42,
+            fg_color="#10B981", hover_color="#059669",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=lambda: [win.destroy(), skip_callback()]
+        ).pack(side="left", padx=4, expand=True, fill="x")
 
     ctk.CTkButton(
         btn_frame, text="✖  Fechar",
-        width=130, height=44,
-        fg_color="#E74C3C", hover_color="#C0392B",
-        font=ctk.CTkFont(size=14, weight="bold"),
+        height=42, width=90,
+        fg_color="#444444", hover_color="#555555",
+        font=ctk.CTkFont(size=12, weight="bold"),
         command=win.destroy
-    ).pack(side="right", padx=8)
+    ).pack(side="left", padx=4)

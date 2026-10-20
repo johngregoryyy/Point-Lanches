@@ -33,6 +33,8 @@ class ScreenCart(ctk.CTkFrame):
     def recarregar(self):
         """Recarrega categorias e produtos da tela de cardápio."""
         self._carregar_categorias()
+        if hasattr(self, "_topbar") and hasattr(self._topbar, "atualizar_status_auth"):
+            self._topbar.atualizar_status_auth()
 
     def _ao_sincronizar(self):
         """Atualiza a tela de cardápio após sincronização com o banco."""
@@ -531,3 +533,5 @@ class ScreenCart(ctk.CTkFrame):
         """Chamado quando a tela fica visível."""
         self._renderizar_carrinho()
         self._carregar_categorias()
+        if hasattr(self, "_topbar") and hasattr(self._topbar, "atualizar_status_auth"):
+            self._topbar.atualizar_status_auth()

@@ -195,8 +195,8 @@ class App(ctk.CTk):
     def _on_login_sucesso(self):
         """Callback acionado após login bem-sucedido."""
         try:
-            from services.supabase_sync import puxar_dados_do_supabase
-            puxar_dados_do_supabase()
+            from services.supabase_sync import sincronizar_tudo_com_supabase
+            sincronizar_tudo_com_supabase(timeout=6)
         except Exception:
             pass
 
@@ -280,10 +280,10 @@ def main():
     def _iniciar_fluxo_autenticacao():
         splash.close()
         if auth_manager.is_authenticated():
-            # Já autenticado com sessão salva: atualiza os dados da nuvem e abre direto
+            # Já autenticado com sessão salva: sincroniza dados com a nuvem e abre direto
             try:
-                from services.supabase_sync import puxar_dados_do_supabase
-                puxar_dados_do_supabase()
+                from services.supabase_sync import sincronizar_tudo_com_supabase
+                sincronizar_tudo_com_supabase(timeout=6)
             except Exception:
                 pass
             app.mostrar_janela_principal()

@@ -327,3 +327,14 @@ Sempre que fizer alterações no código Python:
   - O fechamento da aplicação intercepta o evento do Windows, oculta instantaneamente a janela (`withdraw`) e executa uma sincronização final segura com o Supabase antes da destruição dos recursos (`destroy`), assegurando que nenhum pedido ou alteração fique retido apenas localmente.
 - **Correção Visual da Tela de Login (`ScreenAuth`):**
   - Reorganização e compactação de espaçamentos verticais e campos de entrada para 34px, garantindo que o botão "Continuar Offline (Banco Local)" fique perfeitamente visível em todas as escalas DPI do Windows.
+
+### 9.3. Correção de Pagamento (Débito/Crédito), Detecção Real de Impressora Offline e Visibilidade do Botão Nuvem (v1.1.4)
+- **Seleção Persistente de Forma de Pagamento (Débito e Crédito):**
+  - Removido timer assíncrono de feedback de clique nos botões de pagamento que restaurava `fg_color` para `#333333` após 90ms, garantindo que as opções Débito e Crédito permaneçam destacadas em azul com o botão de confirmação ativo.
+- **Detecção Confiável de Impressora USB Offline / Desconectada:**
+  - Implementada função `is_usb_printer_offline` via Windows Spooler API (`GetPrinterW` Level 2) verificando `PRINTER_ATTRIBUTE_WORK_OFFLINE`, `PRINTER_STATUS_OFFLINE`, falta de papel e erros de hardware antes de enfileirar qualquer trabalho.
+  - Se a Elgin i8 estiver desligada ou com o cabo USB desconectado, o sistema interrompe o processo imediatamente, emite pop-up detalhado de erro de conexão e oferece as opções "Tentar Novamente", "Concluir sem Imprimir" ou "Fechar", eliminando falsos positivos de sucesso.
+- **Visibilidade Estrita do Botão `☁️ Conectar`:**
+  - Corrigida condição de ocultação do botão na `TopBar` com desempacotamento incondicional (`pack_forget`) independente de `winfo_ismapped()`, garantindo que uma vez autenticado no login inicial, o botão suma imediatamente e de forma definitiva de todas as telas.
+- **Sincronização Completa no Login:**
+  - O fluxo de login inicial e o callback de autenticação executam `sincronizar_tudo_com_supabase(timeout=6)`, realizando upload de pendências e download das atualizações da nuvem de ponta a ponta.

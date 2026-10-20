@@ -411,9 +411,12 @@ class TopBar(ctk.CTkFrame):
         try:
             from services.supabase_auth import auth_manager
             auth_manager.add_auth_listener(self.atualizar_status_auth)
-            self.atualizar_status_auth(auth_manager.is_authenticated())
+            # O botão só deve ser empacotado inicialmente se o usuário NÃO estiver logado
+            if not auth_manager.is_authenticated() and self._on_login:
+                self._btn_cloud_login.pack(side="right", padx=5)
         except Exception:
-            self._btn_cloud_login.pack(side="right", padx=5)
+            if self._on_login:
+                self._btn_cloud_login.pack(side="right", padx=5)
 
     def _disparar_sync(self):
         """Dispara sincronização bidirecional em segundo plano com feedback visual."""
@@ -458,17 +461,22 @@ class TopBar(ctk.CTkFrame):
                 except Exception:
                     logado = False
 
-            if not hasattr(self, "_btn_cloud_login"):
+            if not hasattr(self, "_btn_cloud_login") or not self._btn_cloud_login.winfo_exists():
                 return
 
             if logado:
-                # Caso esteja logado, o ícone SOME imediatamente
-                if self._btn_cloud_login.winfo_ismapped():
+                # Caso esteja logado, remove o botão incondicionalmente
+                try:
                     self._btn_cloud_login.pack_forget()
+                except Exception:
+                    pass
             else:
                 # Caso esteja offline, exibe o ícone de login junto aos outros botões
-                if not self._btn_cloud_login.winfo_ismapped() and self._on_login:
-                    self._btn_cloud_login.pack(side="right", padx=5)
+                if self._on_login and self._btn_cloud_login.winfo_manager() != "pack":
+                    try:
+                        self._btn_cloud_login.pack(side="right", padx=5)
+                    except Exception:
+                        pass
 
         try:
             self.after(0, _apply)

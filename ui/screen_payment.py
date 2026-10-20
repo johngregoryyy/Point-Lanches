@@ -86,7 +86,6 @@ class ScreenPayment(ctk.CTkFrame):
                 command=lambda n=nome: self._selecionar_forma(n)
             )
             btn.grid(row=r, column=c, padx=5, pady=5, sticky="ew")
-            habilitar_feedback_clique(btn, cor_flash=COR_PRIMARIA_HVR, debounce_ms=100)
             self._pgto_btns[nome] = btn
 
         # ── Seção PIX (Status selecionável ou branco para caneta) ──
@@ -464,7 +463,11 @@ class ScreenPayment(ctk.CTkFrame):
                 on_error=lambda m: self.after(0, lambda: self._pos_impressao_erro(m, ticket_bytes))
             )
 
-        show_printer_error_popup(self, msg, retry_callback=retry)
+        show_printer_error_popup(
+            self, msg,
+            retry_callback=retry,
+            skip_callback=self._mostrar_sucesso_e_redirecionar
+        )
 
     def _mostrar_sucesso_e_redirecionar(self):
         """Notifica sucesso e redireciona automaticamente limpando o pedido."""
