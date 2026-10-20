@@ -410,51 +410,39 @@ class UpdateDialog(ctk.CTkToplevel):
             ))
             return
 
-        # 4. Executar script Batch de substituição silenciosa e reiniciar
+        # 4. Executar instalador de atualização e reiniciar
         if getattr(sys, "frozen", False):
             exe_name = os.path.basename(current_exe)
             if is_setup_installer:
-                batch_content = f"""@echo off
-chcp 65001 >nul
-title Atualizando Point Lanches...
-set LOGFILE={update_log_file}
+                installer_args = f'/SP- /SILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS /DIR="{exe_dir}" /LOG="{installer_log_file}"'
+                _log_update(f"Disparando instalador diretamente via ShellExecuteW: {temp_file} {installer_args}")
 
-echo =================================================== >> "%LOGFILE%"
-echo [%date% %time%] [updater.bat] Iniciando script de atualizacao >> "%LOGFILE%"
-echo [%date% %time%] [updater.bat] Versao alvo: {self._tag} >> "%LOGFILE%"
-echo [%date% %time%] [updater.bat] Instalador: "{temp_file}" >> "%LOGFILE%"
-echo [%date% %time%] [updater.bat] Diretorio destino: "{exe_dir}" >> "%LOGFILE%"
+                try:
+                    ret = ctypes.windll.shell32.ShellExecuteW(
+                        None,
+                        "open",
+                        temp_file,
+                        installer_args,
+                        None,
+                        1
+                    )
+                    _log_update(f"ShellExecuteW executado com retorno: {ret}")
+                    if ret <= 32:
+                        _log_update("ShellExecuteW retornou codigo <= 32, tentando subprocess.Popen fallback...")
+                        subprocess.Popen(
+                            [temp_file, "/SP-", "/SILENT", "/SUPPRESSMSGBOXES", "/FORCECLOSEAPPLICATIONS", f'/DIR={exe_dir}', f'/LOG={installer_log_file}'],
+                            close_fds=True
+                        )
+                except Exception as exc:
+                    _log_update(f"Erro no ShellExecuteW: {exc}, tentando subprocess.Popen...")
+                    subprocess.Popen(
+                        [temp_file, "/SP-", "/SILENT", "/SUPPRESSMSGBOXES", "/FORCECLOSEAPPLICATIONS", f'/DIR={exe_dir}', f'/LOG={installer_log_file}'],
+                        close_fds=True
+                    )
 
-:: Fallback de elevacao UAC em lote caso executado em diretorio protegido
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [%date% %time%] [updater.bat] Sem privilegios de administrador. Solicitando UAC RunAs... >> "%LOGFILE%"
-    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
-    exit /b
-)
-
-echo [%date% %time%] [updater.bat] Aguardando 2 segundos para encerramento do processo... >> "%LOGFILE%"
-timeout /t 2 /nobreak >nul
-
-:: Garante o encerramento do processo antes de rodar o instalador
-echo [%date% %time%] [updater.bat] Encerrando processo "{exe_name}"... >> "%LOGFILE%"
-taskkill /f /im "{exe_name}" >> "%LOGFILE%" 2>&1
-timeout /t 1 /nobreak >nul
-
-echo [%date% %time%] [updater.bat] Executando instalador Inno Setup... >> "%LOGFILE%"
-"{temp_file}" /SP- /SILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS /DIR="{exe_dir}" /LOG="{installer_log_file}"
-set SETUP_RET=%ERRORLEVEL%
-echo [%date% %time%] [updater.bat] Instalador finalizou com retorno: %SETUP_RET% >> "%LOGFILE%"
-
-echo [%date% %time%] [updater.bat] Reiniciando Point Lanches em "{current_exe}"... >> "%LOGFILE%"
-start "" "{current_exe}"
-
-:: Limpar instalador baixado e este script
-echo [%date% %time%] [updater.bat] Limpando arquivos temporarios... >> "%LOGFILE%"
-del /f /q "{temp_file}" >nul 2>&1
-del /f /q "%~f0" >nul 2>&1
-exit
-"""
+                # Aguarda 300ms para o processo do instalador ser inicializado pelo Windows e encerra
+                self.after(300, lambda: os._exit(0))
+                return
             else:
                 batch_content = f"""@echo off
 chcp 65001 >nul
