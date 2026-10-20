@@ -7,7 +7,7 @@ from database.db import (
     adicionar_produto, atualizar_produto,
     remover_produto, adicionar_categoria,
     atualizar_categoria, contar_produtos_por_categoria, remover_categoria,
-    listar_adicionais, adicionar_adicional, atualizar_adicional,
+    listar_adicionais, adicionar_adicional, atualizar_adicional, remover_adicional,
     listar_taxas, adicionar_taxa, atualizar_taxa, remover_taxa,
     get_config, set_config,
     listar_observacoes_padrao, adicionar_observacao_padrao,
@@ -247,7 +247,15 @@ class ScreenAdmin(ctk.CTkToplevel):
                 pass
         super().destroy()
 
-    # ── ABA 1: CARDÁPIO ───────────────────────────────────────────────────────
+    def _flash_entry_salvo(self, widget, border_normal="#3A3A3A", border_flash="#10B981"):
+        """Aplica borda verde de confirmação visual por 1 segundo ao salvar inline."""
+        try:
+            widget.configure(border_color=border_flash, border_width=2)
+            widget.after(1000, lambda: widget.configure(border_color=border_normal, border_width=1) if widget.winfo_exists() else None)
+        except Exception:
+            pass
+
+    # ── ABA 1: CARDÁPIO (EDIÇÃO INLINE & CADASTRO) ─────────────────────────────
 
     def _build_tab_cardapio(self, tab):
         tab.columnconfigure(0, weight=1)
@@ -261,37 +269,37 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=2)
+        header.columnconfigure(0, weight=3)
         header.columnconfigure(1, weight=1)
         header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=1)
+        header.columnconfigure(3, weight=0)
 
-        for col, txt in enumerate(["Nome", "Categoria", "Preço", "Ação"]):
-            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+        for col, txt in enumerate(["Nome do Produto (clique para editar)", "Categoria", "Preço (R$)", "Ação"]):
+            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w" if col < 3 else "e")
 
         self._tabela_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._tabela_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-        self._tabela_scroll.columnconfigure(0, weight=2)
+        self._tabela_scroll.columnconfigure(0, weight=3)
         self._tabela_scroll.columnconfigure(1, weight=1)
         self._tabela_scroll.columnconfigure(2, weight=1)
-        self._tabela_scroll.columnconfigure(3, weight=1)
+        self._tabela_scroll.columnconfigure(3, weight=0)
 
-        # Form lateral
+        # Form lateral estritamente para adicionar novos produtos
         form = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
         form.grid(row=0, column=1, sticky="nsew")
         form.pack_propagate(False)
 
-        ctk.CTkLabel(form, text="NOVO / EDITAR PRODUTO", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+        ctk.CTkLabel(form, text="ADICIONAR NOVO PRODUTO", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
 
-        ctk.CTkLabel(form, text="Nome", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
-        self._f_nome = ctk.CTkEntry(form, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Xis Salada")
+        ctk.CTkLabel(form, text="Nome do Produto", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        self._f_nome = ctk.CTkEntry(form, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Xis Salada Especial")
         self._f_nome.pack(fill="x", padx=14, pady=(2, 6))
 
         ctk.CTkLabel(form, text="Descrição / Ingredientes", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
-        self._f_desc = ctk.CTkTextbox(form, height=60, font=ctk.CTkFont(size=12))
+        self._f_desc = ctk.CTkTextbox(form, height=65, font=ctk.CTkFont(size=12))
         self._f_desc.pack(fill="x", padx=14, pady=(2, 6))
 
-        ctk.CTkLabel(form, text="Preço (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
+        ctk.CTkLabel(form, text="Preço de Venda (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._f_preco = ctk.CTkEntry(form, height=36, font=ctk.CTkFont(size=13), placeholder_text="0.00", justify="right")
         self._f_preco.pack(fill="x", padx=14, pady=(2, 6))
 
@@ -299,19 +307,38 @@ class ScreenAdmin(ctk.CTkToplevel):
         cats = [c["nome"] for c in listar_categorias()]
         self._f_cat_var = ctk.StringVar(value=cats[0] if cats else "")
         self._f_cat = ctk.CTkComboBox(form, values=cats, variable=self._f_cat_var, height=36, font=ctk.CTkFont(size=13))
-        self._f_cat.pack(fill="x", padx=14, pady=(2, 6))
+        self._f_cat.pack(fill="x", padx=14, pady=(2, 14))
 
-        ctk.CTkLabel(form, text="Nova categoria (opcional)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
-        self._f_nova_cat = ctk.CTkEntry(form, height=34, font=ctk.CTkFont(size=12), placeholder_text="Ex: Sobremesas")
-        self._f_nova_cat.pack(fill="x", padx=14, pady=(2, 10))
+        btn_cadastrar = ctk.CTkButton(
+            form, text="➕  Cadastrar Produto", height=42,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8,
+            command=self._cadastrar_produto
+        )
+        btn_cadastrar.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_cadastrar, cor_flash="#10B981")
 
-        ctk.CTkButton(form, text="💾  Salvar Produto", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_produto).pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkButton(form, text="➕  Limpar / Novo", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_form).pack(fill="x", padx=14, pady=(0, 6))
+        btn_limpar = ctk.CTkButton(
+            form, text="Limpar Campos", height=34,
+            font=ctk.CTkFont(size=12),
+            fg_color="#444", hover_color="#555", corner_radius=8,
+            command=self._limpar_form_produto
+        )
+        btn_limpar.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_limpar, cor_flash="#666")
 
         self._status_lbl = ctk.CTkLabel(form, text="", font=ctk.CTkFont(size=12), wraplength=280)
         self._status_lbl.pack(padx=14)
 
-        # População dos produtos diferida para _finalizar_carregamento_ajustes
+        # Dica explicativa sobre edição inline
+        ctk.CTkLabel(
+            form,
+            text="💡 Edição Rápida:\n"
+                 "    Altere Nome ou Preço diretamente\n"
+                 "    na tabela ao lado e aperte Enter.\n"
+                 "    O sistema salva na hora!",
+            font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
+        ).pack(anchor="w", padx=14, pady=(16, 0))
 
     def _carregar_produtos(self):
         for w in self._tabela_scroll.winfo_children():
@@ -320,85 +347,117 @@ class ScreenAdmin(ctk.CTkToplevel):
         produtos = listar_produtos()
         for i, prod in enumerate(produtos):
             bg = "#272727" if i % 2 == 0 else "#222222"
-            row = ctk.CTkFrame(self._tabela_scroll, fg_color=bg, corner_radius=6, height=38)
+            row = ctk.CTkFrame(self._tabela_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=2)
+            row.columnconfigure(0, weight=3)
             row.columnconfigure(1, weight=1)
             row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=1)
+            row.columnconfigure(3, weight=0)
 
-            ctk.CTkLabel(row, text=prod["nome"], font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
-            ctk.CTkLabel(row, text=prod["categoria"], font=ctk.CTkFont(size=12), anchor="w", text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=8, sticky="w")
-            ctk.CTkLabel(row, text=f"R$ {prod['preco']:.2f}".replace(".", ","), font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+            # Célula 1: Nome do produto (editável inline)
+            entry_nome = ctk.CTkEntry(
+                row, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#1E1E1E", border_width=1, border_color="#333333"
+            )
+            entry_nome.insert(0, prod["nome"])
+            entry_nome.grid(row=0, column=0, padx=6, pady=4, sticky="ew")
 
+            def _ao_mudar_nome(event, p=prod, w=entry_nome):
+                novo_nome = w.get().strip()
+                if not novo_nome or novo_nome == p["nome"]:
+                    w.delete(0, "end")
+                    w.insert(0, p["nome"])
+                    return
+                atualizar_produto(p["id"], novo_nome, p.get("descricao", ""), p["preco"], p["categoria_id"], p.get("ativo", 1))
+                p["nome"] = novo_nome
+                self._flash_entry_salvo(w, border_normal="#333333", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            entry_nome.bind("<Return>", _ao_mudar_nome)
+            entry_nome.bind("<FocusOut>", _ao_mudar_nome)
+
+            # Célula 2: Categoria
+            ctk.CTkLabel(row, text=prod["categoria"], font=ctk.CTkFont(size=12), anchor="w", text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, sticky="w")
+
+            # Célula 3: Preço (editável inline)
+            entry_preco = ctk.CTkEntry(
+                row, width=95, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#181818", border_width=1, border_color="#3A3A3A",
+                text_color=COR_VERDE, justify="right"
+            )
+            entry_preco.insert(0, f"{prod['preco']:.2f}".replace(".", ","))
+            entry_preco.grid(row=0, column=2, padx=6, pady=4, sticky="e")
+
+            def _ao_mudar_preco(event, p=prod, w=entry_preco):
+                val_raw = w.get().replace("R$", "").replace(" ", "").replace(",", ".").strip()
+                try:
+                    novo_preco = float(val_raw)
+                    if novo_preco < 0:
+                        raise ValueError()
+                except ValueError:
+                    w.delete(0, "end")
+                    w.insert(0, f"{p['preco']:.2f}".replace(".", ","))
+                    return
+                if abs(novo_preco - p["preco"]) < 0.001:
+                    w.delete(0, "end")
+                    w.insert(0, f"{p['preco']:.2f}".replace(".", ","))
+                    return
+                atualizar_produto(p["id"], p["nome"], p.get("descricao", ""), novo_preco, p["categoria_id"], p.get("ativo", 1))
+                p["preco"] = novo_preco
+                w.delete(0, "end")
+                w.insert(0, f"{novo_preco:.2f}".replace(".", ","))
+                self._flash_entry_salvo(w, border_normal="#3A3A3A", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            entry_preco.bind("<Return>", _ao_mudar_preco)
+            entry_preco.bind("<FocusOut>", _ao_mudar_preco)
+
+            # Célula 4: Ação única Excluir (🗑) com diálogo de confirmação
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
-            btn_edit = ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda p=prod: self._editar_produto(p))
-            btn_edit.pack(side="left", padx=2)
-            habilitar_feedback_clique(btn_edit, cor_flash="#666666")
+            btn_frame.grid(row=0, column=3, padx=(4, 8), sticky="e")
 
-            btn_del = ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda p=prod: self._confirmar_remocao(p))
-            btn_del.pack(side="left", padx=2)
+            btn_del = ctk.CTkButton(
+                btn_frame, text="🗑", width=34, height=28,
+                font=ctk.CTkFont(size=13),
+                fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR,
+                corner_radius=6, command=lambda p=prod: self._confirmar_remocao(p)
+            )
+            btn_del.pack(side="left")
             habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
 
-    def _editar_produto(self, prod: dict):
-        self._produto_selecionado = prod
-        self._f_nome.delete(0, "end")
-        self._f_nome.insert(0, prod["nome"])
-        self._f_desc.delete("1.0", "end")
-        self._f_desc.insert("1.0", prod.get("descricao", ""))
-        self._f_preco.delete(0, "end")
-        self._f_preco.insert(0, str(prod["preco"]))
-        self._f_cat_var.set(prod.get("categoria", ""))
-        self._status_lbl.configure(text=f"Editando: {prod['nome']}", text_color=COR_AZUL_POINT)
-
-    def _salvar_produto(self):
+    def _cadastrar_produto(self):
         nome = self._f_nome.get().strip()
         desc = self._f_desc.get("1.0", "end").strip()
         preco_str = self._f_preco.get().strip().replace(",", ".")
-        nova_cat = self._f_nova_cat.get().strip()
+        cat_nome = self._f_cat_var.get()
 
         if not nome:
-            self._status_lbl.configure(text="⚠ Nome é obrigatório!", text_color=COR_VERMELHO)
+            self._status_lbl.configure(text="⚠ Nome do produto é obrigatório!", text_color=COR_VERMELHO)
             return
         try:
             preco = float(preco_str)
+            if preco < 0:
+                raise ValueError()
         except ValueError:
             self._status_lbl.configure(text="⚠ Preço inválido!", text_color=COR_VERMELHO)
             return
 
-        if nova_cat:
-            adicionar_categoria(nova_cat)
-            cat_nome = nova_cat
-        else:
-            cat_nome = self._f_cat_var.get()
-
         cats = {c["nome"]: c["id"] for c in listar_categorias()}
         cat_id = cats.get(cat_nome)
         if not cat_id:
-            self._status_lbl.configure(text="⚠ Categoria inválida!", text_color=COR_VERMELHO)
+            self._status_lbl.configure(text="⚠ Selecione uma categoria!", text_color=COR_VERMELHO)
             return
 
-        if self._produto_selecionado:
-            atualizar_produto(self._produto_selecionado["id"], nome, desc, preco, cat_id)
-            self._status_lbl.configure(text=f"✅ '{nome}' atualizado!", text_color=COR_VERDE)
-        else:
-            adicionar_produto(cat_id, nome, desc, preco)
-            self._status_lbl.configure(text=f"✅ '{nome}' adicionado!", text_color=COR_VERDE)
-
-        self._limpar_form()
-        self._carregar_produtos()
-        self._atualizar_combobox_categorias()
-        if hasattr(self, "_carregar_categorias_tab"):
-            self._carregar_categorias_tab()
-        if self._on_refresh:
-            try:
-                self._on_refresh()
-            except Exception:
-                pass
-
-    def _confirmar_remocao(self, prod: dict):
-        remover_produto(prod["id"])
+        adicionar_produto(cat_id, nome, desc, preco)
+        self._limpar_form_produto()
         self._carregar_produtos()
         if hasattr(self, "_carregar_categorias_tab"):
             self._carregar_categorias_tab()
@@ -407,14 +466,32 @@ class ScreenAdmin(ctk.CTkToplevel):
                 self._on_refresh()
             except Exception:
                 pass
+        self._status_lbl.configure(text=f"✅ '{nome}' cadastrado!", text_color=COR_VERDE)
 
-    def _limpar_form(self):
-        self._produto_selecionado = None
+    def _limpar_form_produto(self):
         self._f_nome.delete(0, "end")
         self._f_desc.delete("1.0", "end")
         self._f_preco.delete(0, "end")
-        self._f_nova_cat.delete(0, "end")
         self._status_lbl.configure(text="")
+
+    def _confirmar_remocao(self, prod: dict):
+        def _exec():
+            remover_produto(prod["id"])
+            self._carregar_produtos()
+            if hasattr(self, "_carregar_categorias_tab"):
+                self._carregar_categorias_tab()
+            if self._on_refresh:
+                try:
+                    self._on_refresh()
+                except Exception:
+                    pass
+
+        self._confirmar_dialogo(
+            "Excluir Produto",
+            f"Deseja realmente excluir o produto '{prod['nome']}'?\n\nEle não aparecerá mais no cardápio.",
+            _exec,
+            icone="🗑"
+        )
 
     # ── ABA 1B: GESTÃO DEDICADA DE CATEGORIAS (CRUD COMPLETO) ─────────────────
 
@@ -666,20 +743,20 @@ class ScreenAdmin(ctk.CTkToplevel):
         header.columnconfigure(0, weight=2)
         header.columnconfigure(1, weight=1)
         header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=1)
+        header.columnconfigure(3, weight=0)
 
-        for col, txt in enumerate(["Adicional / Extra", "Acréscimo (R$)", "Status", "Ações"]):
+        for col, txt in enumerate(["Adicional / Extra (Clique para editar)", "Acréscimo (R$)", "Ativo", "Ações"]):
             ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
 
         self._adicionais_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._adicionais_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
 
-        # Form lateral adicionais
+        # Form lateral adicionais (focado estritamente em novos cadastros)
         form_ad = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
         form_ad.grid(row=0, column=1, sticky="nsew")
         form_ad.pack_propagate(False)
 
-        ctk.CTkLabel(form_ad, text="GERENCIAR ADICIONAL", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+        ctk.CTkLabel(form_ad, text="ADICIONAR NOVO ADICIONAL", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
 
         ctk.CTkLabel(form_ad, text="Nome do Adicional", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._ad_nome = ctk.CTkEntry(form_ad, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Bacon, Queijo Extra...")
@@ -687,19 +764,36 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         ctk.CTkLabel(form_ad, text="Preço / Acréscimo (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._ad_preco = ctk.CTkEntry(form_ad, height=36, font=ctk.CTkFont(size=13), placeholder_text="3.00", justify="right")
-        self._ad_preco.pack(fill="x", padx=14, pady=(2, 8))
+        self._ad_preco.pack(fill="x", padx=14, pady=(2, 14))
 
-        self._ad_ativo_var = ctk.BooleanVar(value=True)
-        self._ad_switch = ctk.CTkSwitch(form_ad, text="Ativo no cardápio", variable=self._ad_ativo_var)
-        self._ad_switch.pack(anchor="w", padx=14, pady=(4, 14))
+        btn_cadastrar_ad = ctk.CTkButton(
+            form_ad, text="➕  Cadastrar Adicional", height=40,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8,
+            command=self._cadastrar_adicional
+        )
+        btn_cadastrar_ad.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_cadastrar_ad, cor_flash="#10B981")
 
-        ctk.CTkButton(form_ad, text="💾  Salvar Adicional", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_adicional).pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkButton(form_ad, text="➕  Novo / Limpar", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_adicional).pack(fill="x", padx=14, pady=(0, 6))
+        btn_limpar_ad = ctk.CTkButton(
+            form_ad, text="Limpar Campos", height=36,
+            font=ctk.CTkFont(size=12),
+            fg_color="#444", hover_color="#555", corner_radius=8,
+            command=self._limpar_form_adicional
+        )
+        btn_limpar_ad.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_limpar_ad, cor_flash="#666666")
 
         self._ad_status_lbl = ctk.CTkLabel(form_ad, text="", font=ctk.CTkFont(size=12), wraplength=280)
-        self._ad_status_lbl.pack(padx=14)
+        self._ad_status_lbl.pack(padx=14, pady=(8, 0))
 
-        # População dos adicionais diferida para _finalizar_carregamento_ajustes
+        ctk.CTkLabel(
+            form_ad,
+            text="💡 Edite nomes e valores diretamente\n"
+                 "    na tabela ao lado (Enter para salvar).\n"
+                 "    Alterne o status no switch de cada linha.",
+            font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
+        ).pack(anchor="w", padx=14, pady=(16, 0))
 
     def _carregar_adicionais(self):
         for w in self._adicionais_scroll.winfo_children():
@@ -708,73 +802,158 @@ class ScreenAdmin(ctk.CTkToplevel):
         adicionais = listar_adicionais(apenas_ativos=False)
         for i, ad in enumerate(adicionais):
             bg = "#272727" if i % 2 == 0 else "#222222"
-            row = ctk.CTkFrame(self._adicionais_scroll, fg_color=bg, corner_radius=6, height=38)
+            row = ctk.CTkFrame(self._adicionais_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
             row.columnconfigure(0, weight=2)
             row.columnconfigure(1, weight=1)
             row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=1)
+            row.columnconfigure(3, weight=0)
 
-            ctk.CTkLabel(row, text=ad["nome"], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
-            ctk.CTkLabel(row, text=f"+ R$ {ad['preco']:.2f}".replace(".", ","), font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+            # Célula 1: Nome do adicional (editável inline)
+            entry_nome = ctk.CTkEntry(
+                row, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#1E1E1E", border_width=1, border_color="#333333"
+            )
+            entry_nome.insert(0, ad["nome"])
+            entry_nome.grid(row=0, column=0, padx=6, pady=4, sticky="ew")
 
-            status_txt = "Ativo" if ad.get("ativo", 1) else "Inativo"
-            status_cor = COR_VERDE if ad.get("ativo", 1) else COR_VERMELHO
-            ctk.CTkLabel(row, text=status_txt, font=ctk.CTkFont(size=11, weight="bold"), text_color=status_cor, anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+            def _ao_mudar_nome(event, a=ad, w=entry_nome):
+                novo_nome = w.get().strip()
+                if not novo_nome or novo_nome == a["nome"]:
+                    w.delete(0, "end")
+                    w.insert(0, a["nome"])
+                    return
+                atualizar_adicional(a["id"], novo_nome, a["preco"], a.get("ativo", 1))
+                a["nome"] = novo_nome
+                self._flash_entry_salvo(w, border_normal="#333333", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
 
+            entry_nome.bind("<Return>", _ao_mudar_nome)
+            entry_nome.bind("<FocusOut>", _ao_mudar_nome)
+
+            # Célula 2: Preço / Acréscimo (editável inline)
+            entry_preco = ctk.CTkEntry(
+                row, width=95, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#181818", border_width=1, border_color="#3A3A3A",
+                text_color=COR_VERDE, justify="right"
+            )
+            entry_preco.insert(0, f"{ad['preco']:.2f}".replace(".", ","))
+            entry_preco.grid(row=0, column=1, padx=6, pady=4, sticky="e")
+
+            def _ao_mudar_preco(event, a=ad, w=entry_preco):
+                val_raw = w.get().replace("R$", "").replace(" ", "").replace(",", ".").strip()
+                try:
+                    novo_preco = float(val_raw)
+                    if novo_preco < 0:
+                        raise ValueError()
+                except ValueError:
+                    w.delete(0, "end")
+                    w.insert(0, f"{a['preco']:.2f}".replace(".", ","))
+                    return
+                if abs(novo_preco - a["preco"]) < 0.001:
+                    w.delete(0, "end")
+                    w.insert(0, f"{a['preco']:.2f}".replace(".", ","))
+                    return
+                atualizar_adicional(a["id"], a["nome"], novo_preco, a.get("ativo", 1))
+                a["preco"] = novo_preco
+                w.delete(0, "end")
+                w.insert(0, f"{novo_preco:.2f}".replace(".", ","))
+                self._flash_entry_salvo(w, border_normal="#3A3A3A", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            entry_preco.bind("<Return>", _ao_mudar_preco)
+            entry_preco.bind("<FocusOut>", _ao_mudar_preco)
+
+            # Célula 3: Status Ativo/Inativo (switch direto na linha)
+            var_ativo = ctk.BooleanVar(value=bool(ad.get("ativo", 1)))
+            switch_ativo = ctk.CTkSwitch(
+                row, text="Ativo" if var_ativo.get() else "Inativo",
+                variable=var_ativo,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                progress_color=COR_VERDE
+            )
+            switch_ativo.grid(row=0, column=2, padx=8, pady=4, sticky="w")
+
+            def _ao_toggle_ad(a=ad, var=var_ativo, sw=switch_ativo):
+                st = 1 if var.get() else 0
+                atualizar_adicional(a["id"], a["nome"], a["preco"], st)
+                a["ativo"] = st
+                sw.configure(text="Ativo" if st else "Inativo")
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            switch_ativo.configure(command=_ao_toggle_ad)
+
+            # Célula 4: Ação única Excluir (🗑) com confirmação
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
+            btn_frame.grid(row=0, column=3, padx=(4, 8), sticky="e")
 
-            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda a=ad: self._editar_adicional(a)).pack(side="left", padx=2)
+            btn_del = ctk.CTkButton(
+                btn_frame, text="🗑", width=34, height=28,
+                font=ctk.CTkFont(size=13),
+                fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR,
+                corner_radius=6, command=lambda a=ad: self._confirmar_remocao_adicional(a)
+            )
+            btn_del.pack(side="left")
+            habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
 
-            novo_status = 0 if ad.get("ativo", 1) else 1
-            btn_txt = "Desativar" if ad.get("ativo", 1) else "Ativar"
-            btn_cor = COR_VERMELHO if ad.get("ativo", 1) else COR_VERDE
-            ctk.CTkButton(btn_frame, text=btn_txt, width=70, height=26, font=ctk.CTkFont(size=11), fg_color=btn_cor, corner_radius=6, command=lambda a=ad, st=novo_status: self._toggle_adicional(a, st)).pack(side="left", padx=2)
-
-    def _editar_adicional(self, ad: dict):
-        self._adicional_selecionado = ad
-        self._ad_nome.delete(0, "end")
-        self._ad_nome.insert(0, ad["nome"])
-        self._ad_preco.delete(0, "end")
-        self._ad_preco.insert(0, str(ad["preco"]))
-        self._ad_ativo_var.set(bool(ad.get("ativo", 1)))
-        self._ad_status_lbl.configure(text=f"Editando: {ad['nome']}", text_color=COR_AZUL_POINT)
-
-    def _salvar_adicional(self):
+    def _cadastrar_adicional(self):
         nome = self._ad_nome.get().strip()
         preco_str = self._ad_preco.get().strip().replace(",", ".")
-        ativo = 1 if self._ad_ativo_var.get() else 0
 
         if not nome:
             self._ad_status_lbl.configure(text="⚠ Nome é obrigatório!", text_color=COR_VERMELHO)
             return
         try:
             preco = float(preco_str)
+            if preco < 0:
+                raise ValueError()
         except ValueError:
             self._ad_status_lbl.configure(text="⚠ Preço inválido!", text_color=COR_VERMELHO)
             return
 
-        if self._adicional_selecionado:
-            atualizar_adicional(self._adicional_selecionado["id"], nome, preco, ativo)
-            self._ad_status_lbl.configure(text=f"✅ '{nome}' atualizado!", text_color=COR_VERDE)
-        else:
-            adicionar_adicional(nome, preco)
-            self._ad_status_lbl.configure(text=f"✅ '{nome}' adicionado!", text_color=COR_VERDE)
-
-        self._limpar_adicional()
+        adicionar_adicional(nome, preco)
+        self._limpar_form_adicional()
         self._carregar_adicionais()
+        if self._on_refresh:
+            try:
+                self._on_refresh()
+            except Exception:
+                pass
+        self._ad_status_lbl.configure(text=f"✅ '{nome}' cadastrado!", text_color=COR_VERDE)
 
-    def _toggle_adicional(self, ad: dict, novo_status: int):
-        atualizar_adicional(ad["id"], ad["nome"], ad["preco"], novo_status)
-        self._carregar_adicionais()
-
-    def _limpar_adicional(self):
-        self._adicional_selecionado = None
+    def _limpar_form_adicional(self):
         self._ad_nome.delete(0, "end")
         self._ad_preco.delete(0, "end")
-        self._ad_ativo_var.set(True)
         self._ad_status_lbl.configure(text="")
+
+    def _confirmar_remocao_adicional(self, ad: dict):
+        def _exec():
+            remover_adicional(ad["id"])
+            self._carregar_adicionais()
+            if self._on_refresh:
+                try:
+                    self._on_refresh()
+                except Exception:
+                    pass
+
+        self._confirmar_dialogo(
+            "Excluir Adicional",
+            f"Deseja realmente excluir o adicional '{ad['nome']}'?\n\nEle não aparecerá mais como opção no cardápio.",
+            _exec,
+            icone="🗑"
+        )
 
     # ── ABA 3: TAXAS DE TELE-ENTREGA ──────────────────────────────────────────
 
@@ -793,20 +972,20 @@ class ScreenAdmin(ctk.CTkToplevel):
         header.columnconfigure(0, weight=1)
         header.columnconfigure(1, weight=2)
         header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=1)
+        header.columnconfigure(3, weight=0)
 
-        for col, txt in enumerate(["Valor (R$)", "Texto no Botão", "Status", "Ações"]):
+        for col, txt in enumerate(["Valor (R$) (Clique para editar)", "Rótulo no Botão", "Ativo", "Ações"]):
             ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
 
         self._taxas_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._taxas_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
 
-        # Form lateral taxas
+        # Form lateral taxas (focado estritamente em novos cadastros)
         form_tx = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
         form_tx.grid(row=0, column=1, sticky="nsew")
         form_tx.pack_propagate(False)
 
-        ctk.CTkLabel(form_tx, text="CONFIGURAR BOTÃO DE TAXA", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+        ctk.CTkLabel(form_tx, text="ADICIONAR NOVA TAXA", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
 
         ctk.CTkLabel(form_tx, text="Valor Numérico (R$)", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._tx_valor = ctk.CTkEntry(form_tx, height=36, font=ctk.CTkFont(size=13), placeholder_text="7.00", justify="right")
@@ -814,19 +993,36 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         ctk.CTkLabel(form_tx, text="Rótulo no Botão", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._tx_label = ctk.CTkEntry(form_tx, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: R$ 7 ou Grátis")
-        self._tx_label.pack(fill="x", padx=14, pady=(2, 8))
+        self._tx_label.pack(fill="x", padx=14, pady=(2, 14))
 
-        self._tx_ativo_var = ctk.BooleanVar(value=True)
-        self._tx_switch = ctk.CTkSwitch(form_tx, text="Ativo na tela de entrega", variable=self._tx_ativo_var)
-        self._tx_switch.pack(anchor="w", padx=14, pady=(4, 14))
+        btn_cadastrar_tx = ctk.CTkButton(
+            form_tx, text="➕  Cadastrar Taxa", height=40,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8,
+            command=self._cadastrar_taxa
+        )
+        btn_cadastrar_tx.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_cadastrar_tx, cor_flash="#10B981")
 
-        ctk.CTkButton(form_tx, text="💾  Salvar Botão de Taxa", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_taxa).pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkButton(form_tx, text="➕  Novo / Limpar", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_taxa).pack(fill="x", padx=14, pady=(0, 6))
+        btn_limpar_tx = ctk.CTkButton(
+            form_tx, text="Limpar Campos", height=36,
+            font=ctk.CTkFont(size=12),
+            fg_color="#444", hover_color="#555", corner_radius=8,
+            command=self._limpar_form_taxa
+        )
+        btn_limpar_tx.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_limpar_tx, cor_flash="#666666")
 
         self._tx_status_lbl = ctk.CTkLabel(form_tx, text="", font=ctk.CTkFont(size=12), wraplength=280)
-        self._tx_status_lbl.pack(padx=14)
+        self._tx_status_lbl.pack(padx=14, pady=(8, 0))
 
-        # População das taxas diferida para _finalizar_carregamento_ajustes
+        ctk.CTkLabel(
+            form_tx,
+            text="💡 Edite valores e rótulos diretamente\n"
+                 "    na tabela ao lado (Enter para salvar).\n"
+                 "    Alterne o status no switch de cada linha.",
+            font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
+        ).pack(anchor="w", padx=14, pady=(16, 0))
 
     def _carregar_taxas(self):
         for w in self._taxas_scroll.winfo_children():
@@ -835,42 +1031,120 @@ class ScreenAdmin(ctk.CTkToplevel):
         taxas = listar_taxas(apenas_ativas=False)
         for i, tx in enumerate(taxas):
             bg = "#272727" if i % 2 == 0 else "#222222"
-            row = ctk.CTkFrame(self._taxas_scroll, fg_color=bg, corner_radius=6, height=38)
+            row = ctk.CTkFrame(self._taxas_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
             row.columnconfigure(0, weight=1)
             row.columnconfigure(1, weight=2)
             row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=1)
+            row.columnconfigure(3, weight=0)
 
-            ctk.CTkLabel(row, text=f"R$ {tx['valor']:.2f}".replace(".", ","), font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
-            ctk.CTkLabel(row, text=tx["label"], font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+            # Célula 1: Valor Numérico (editável inline)
+            entry_valor = ctk.CTkEntry(
+                row, width=85, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#181818", border_width=1, border_color="#3A3A3A",
+                text_color=COR_VERDE, justify="right"
+            )
+            entry_valor.insert(0, f"{tx['valor']:.2f}".replace(".", ","))
+            entry_valor.grid(row=0, column=0, padx=6, pady=4, sticky="w")
 
-            status_txt = "Ativo" if tx.get("ativo", 1) else "Inativo"
-            status_cor = COR_VERDE if tx.get("ativo", 1) else COR_VERMELHO
-            ctk.CTkLabel(row, text=status_txt, font=ctk.CTkFont(size=11, weight="bold"), text_color=status_cor, anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+            def _ao_mudar_valor(event, t=tx, w=entry_valor):
+                val_raw = w.get().replace("R$", "").replace(" ", "").replace(",", ".").strip()
+                try:
+                    novo_val = float(val_raw)
+                    if novo_val < 0:
+                        raise ValueError()
+                except ValueError:
+                    w.delete(0, "end")
+                    w.insert(0, f"{t['valor']:.2f}".replace(".", ","))
+                    return
+                if abs(novo_val - t["valor"]) < 0.001:
+                    w.delete(0, "end")
+                    w.insert(0, f"{t['valor']:.2f}".replace(".", ","))
+                    return
+                atualizar_taxa(t["id"], novo_val, t["label"], t.get("ativo", 1))
+                t["valor"] = novo_val
+                w.delete(0, "end")
+                w.insert(0, f"{novo_val:.2f}".replace(".", ","))
+                self._flash_entry_salvo(w, border_normal="#3A3A3A", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
 
+            entry_valor.bind("<Return>", _ao_mudar_valor)
+            entry_valor.bind("<FocusOut>", _ao_mudar_valor)
+
+            # Célula 2: Rótulo / Texto no Botão (editável inline)
+            entry_label = ctk.CTkEntry(
+                row, height=30, font=ctk.CTkFont(size=12),
+                fg_color="#1E1E1E", border_width=1, border_color="#333333"
+            )
+            entry_label.insert(0, tx["label"])
+            entry_label.grid(row=0, column=1, padx=6, pady=4, sticky="ew")
+
+            def _ao_mudar_label(event, t=tx, w=entry_label):
+                novo_label = w.get().strip()
+                if not novo_label or novo_label == t["label"]:
+                    w.delete(0, "end")
+                    w.insert(0, t["label"])
+                    return
+                atualizar_taxa(t["id"], t["valor"], novo_label, t.get("ativo", 1))
+                t["label"] = novo_label
+                self._flash_entry_salvo(w, border_normal="#333333", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            entry_label.bind("<Return>", _ao_mudar_label)
+            entry_label.bind("<FocusOut>", _ao_mudar_label)
+
+            # Célula 3: Status Ativo/Inativo (switch direto na linha)
+            var_ativo = ctk.BooleanVar(value=bool(tx.get("ativo", 1)))
+            switch_ativo = ctk.CTkSwitch(
+                row, text="Ativo" if var_ativo.get() else "Inativo",
+                variable=var_ativo,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                progress_color=COR_VERDE
+            )
+            switch_ativo.grid(row=0, column=2, padx=8, pady=4, sticky="w")
+
+            def _ao_toggle_tx(t=tx, var=var_ativo, sw=switch_ativo):
+                st = 1 if var.get() else 0
+                atualizar_taxa(t["id"], t["valor"], t["label"], st)
+                t["ativo"] = st
+                sw.configure(text="Ativo" if st else "Inativo")
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            switch_ativo.configure(command=_ao_toggle_tx)
+
+            # Célula 4: Ação única Excluir (🗑) com confirmação
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
+            btn_frame.grid(row=0, column=3, padx=(4, 8), sticky="e")
 
-            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda t=tx: self._editar_taxa(t)).pack(side="left", padx=2)
-            ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda t=tx: self._excluir_taxa(t)).pack(side="left", padx=2)
+            btn_del = ctk.CTkButton(
+                btn_frame, text="🗑", width=34, height=28,
+                font=ctk.CTkFont(size=13),
+                fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR,
+                corner_radius=6, command=lambda t=tx: self._confirmar_remocao_taxa(t)
+            )
+            btn_del.pack(side="left")
+            habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
 
-    def _editar_taxa(self, tx: dict):
-        self._taxa_selecionada = tx
-        self._tx_valor.delete(0, "end")
-        self._tx_valor.insert(0, str(tx["valor"]))
-        self._tx_label.delete(0, "end")
-        self._tx_label.insert(0, tx["label"])
-        self._tx_ativo_var.set(bool(tx.get("ativo", 1)))
-        self._tx_status_lbl.configure(text=f"Editando: {tx['label']}", text_color=COR_AZUL_POINT)
-
-    def _salvar_taxa(self):
+    def _cadastrar_taxa(self):
         val_str = self._tx_valor.get().strip().replace(",", ".")
         label = self._tx_label.get().strip()
-        ativo = 1 if self._tx_ativo_var.get() else 0
 
         try:
             valor = float(val_str)
+            if valor < 0:
+                raise ValueError()
         except ValueError:
             self._tx_status_lbl.configure(text="⚠ Valor numérico inválido!", text_color=COR_VERMELHO)
             return
@@ -878,26 +1152,37 @@ class ScreenAdmin(ctk.CTkToplevel):
         if not label:
             label = "Grátis" if valor == 0 else f"R$ {int(valor) if valor == int(valor) else valor}"
 
-        if self._taxa_selecionada:
-            atualizar_taxa(self._taxa_selecionada["id"], valor, label, ativo)
-            self._tx_status_lbl.configure(text=f"✅ Botão '{label}' atualizado!", text_color=COR_VERDE)
-        else:
-            adicionar_taxa(valor, label, ativo)
-            self._tx_status_lbl.configure(text=f"✅ Botão '{label}' adicionado!", text_color=COR_VERDE)
-
-        self._limpar_taxa()
+        adicionar_taxa(valor, label, 1)
+        self._limpar_form_taxa()
         self._carregar_taxas()
+        if self._on_refresh:
+            try:
+                self._on_refresh()
+            except Exception:
+                pass
+        self._tx_status_lbl.configure(text=f"✅ Botão '{label}' adicionado!", text_color=COR_VERDE)
 
-    def _excluir_taxa(self, tx: dict):
-        remover_taxa(tx["id"])
-        self._carregar_taxas()
-
-    def _limpar_taxa(self):
-        self._taxa_selecionada = None
+    def _limpar_form_taxa(self):
         self._tx_valor.delete(0, "end")
         self._tx_label.delete(0, "end")
-        self._tx_ativo_var.set(True)
         self._tx_status_lbl.configure(text="")
+
+    def _confirmar_remocao_taxa(self, tx: dict):
+        def _exec():
+            remover_taxa(tx["id"])
+            self._carregar_taxas()
+            if self._on_refresh:
+                try:
+                    self._on_refresh()
+                except Exception:
+                    pass
+
+        self._confirmar_dialogo(
+            "Excluir Taxa",
+            f"Deseja realmente excluir a opção de taxa '{tx['label']}' (R$ {tx['valor']:.2f})?",
+            _exec,
+            icone="🗑"
+        )
 
     # ── ABA 4: OBSERVAÇÕES RÁPIDAS ───────────────────────────────────────────
 
@@ -913,47 +1198,55 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=2)
+        header.columnconfigure(0, weight=3)
         header.columnconfigure(1, weight=1)
-        header.columnconfigure(2, weight=1)
+        header.columnconfigure(2, weight=0)
 
-        for col, txt in enumerate(["Texto da Observação", "Status", "Ações"]):
+        for col, txt in enumerate(["Texto da Observação (Clique para editar)", "Ativo", "Ações"]):
             ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
 
         self._obs_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._obs_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
 
-        # Form lateral observações
+        # Form lateral observações (focado estritamente em novos cadastros)
         form_obs = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
         form_obs.grid(row=0, column=1, sticky="nsew")
         form_obs.pack_propagate(False)
 
-        ctk.CTkLabel(form_obs, text="GERENCIAR OBSERVAÇÃO", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+        ctk.CTkLabel(form_obs, text="ADICIONAR NOVA OBSERVAÇÃO", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
 
         ctk.CTkLabel(form_obs, text="Texto da Observação", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._obs_texto = ctk.CTkEntry(form_obs, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Sem Cebola, Bem Passado...")
-        self._obs_texto.pack(fill="x", padx=14, pady=(2, 8))
+        self._obs_texto.pack(fill="x", padx=14, pady=(2, 14))
 
-        self._obs_ativo_var = ctk.BooleanVar(value=True)
-        self._obs_switch = ctk.CTkSwitch(form_obs, text="Ativa no pop-up de itens", variable=self._obs_ativo_var)
-        self._obs_switch.pack(anchor="w", padx=14, pady=(4, 14))
+        btn_cadastrar_obs = ctk.CTkButton(
+            form_obs, text="➕  Cadastrar Observação", height=40,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8,
+            command=self._cadastrar_obs
+        )
+        btn_cadastrar_obs.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_cadastrar_obs, cor_flash="#10B981")
 
-        ctk.CTkButton(form_obs, text="💾  Salvar Observação", height=40, font=ctk.CTkFont(size=13, weight="bold"), fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8, command=self._salvar_obs).pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkButton(form_obs, text="➕  Novo / Limpar", height=36, font=ctk.CTkFont(size=12), fg_color="#444", hover_color="#555", corner_radius=8, command=self._limpar_obs).pack(fill="x", padx=14, pady=(0, 6))
+        btn_limpar_obs = ctk.CTkButton(
+            form_obs, text="Limpar Campos", height=36,
+            font=ctk.CTkFont(size=12),
+            fg_color="#444", hover_color="#555", corner_radius=8,
+            command=self._limpar_form_obs
+        )
+        btn_limpar_obs.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_limpar_obs, cor_flash="#666666")
 
         self._obs_status_lbl = ctk.CTkLabel(form_obs, text="", font=ctk.CTkFont(size=12), wraplength=280)
-        self._obs_status_lbl.pack(padx=14)
+        self._obs_status_lbl.pack(padx=14, pady=(8, 0))
 
-        # Dica
         ctk.CTkLabel(
             form_obs,
             text="💡 Essas observações aparecem como\n"
-                 "    botões rápidos no pop-up de\n"
-                 "    personalização de cada item.",
+                 "    botões rápidos no pop-up de itens.\n"
+                 "    Edite o texto clicando na tabela ao lado.",
             font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
         ).pack(anchor="w", padx=14, pady=(20, 0))
-
-        # População das observações diferida para _finalizar_carregamento_ajustes
 
     def _carregar_obs(self):
         for w in self._obs_scroll.winfo_children():
@@ -962,68 +1255,111 @@ class ScreenAdmin(ctk.CTkToplevel):
         obs_list = listar_observacoes_padrao(apenas_ativas=False)
         for i, obs in enumerate(obs_list):
             bg = "#272727" if i % 2 == 0 else "#222222"
-            row = ctk.CTkFrame(self._obs_scroll, fg_color=bg, corner_radius=6, height=38)
+            row = ctk.CTkFrame(self._obs_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=2)
+            row.columnconfigure(0, weight=3)
             row.columnconfigure(1, weight=1)
-            row.columnconfigure(2, weight=1)
+            row.columnconfigure(2, weight=0)
 
-            ctk.CTkLabel(row, text=obs["texto"], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, padx=8, sticky="w")
+            # Célula 1: Texto da Observação (editável inline)
+            entry_texto = ctk.CTkEntry(
+                row, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#1E1E1E", border_width=1, border_color="#333333"
+            )
+            entry_texto.insert(0, obs["texto"])
+            entry_texto.grid(row=0, column=0, padx=6, pady=4, sticky="ew")
 
-            status_txt = "Ativa" if obs.get("ativo", 1) else "Inativa"
-            status_cor = COR_VERDE if obs.get("ativo", 1) else COR_VERMELHO
-            ctk.CTkLabel(row, text=status_txt, font=ctk.CTkFont(size=11, weight="bold"), text_color=status_cor, anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+            def _ao_mudar_texto(event, o=obs, w=entry_texto):
+                novo_texto = w.get().strip()
+                if not novo_texto or novo_texto == o["texto"]:
+                    w.delete(0, "end")
+                    w.insert(0, o["texto"])
+                    return
+                atualizar_observacao_padrao(o["id"], novo_texto, o.get("ativo", 1))
+                o["texto"] = novo_texto
+                self._flash_entry_salvo(w, border_normal="#333333", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
 
+            entry_texto.bind("<Return>", _ao_mudar_texto)
+            entry_texto.bind("<FocusOut>", _ao_mudar_texto)
+
+            # Célula 2: Status Ativo/Inativo (switch direto na linha)
+            var_ativo = ctk.BooleanVar(value=bool(obs.get("ativo", 1)))
+            switch_ativo = ctk.CTkSwitch(
+                row, text="Ativa" if var_ativo.get() else "Inativa",
+                variable=var_ativo,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                progress_color=COR_VERDE
+            )
+            switch_ativo.grid(row=0, column=1, padx=8, pady=4, sticky="w")
+
+            def _ao_toggle_obs(o=obs, var=var_ativo, sw=switch_ativo):
+                st = 1 if var.get() else 0
+                atualizar_observacao_padrao(o["id"], o["texto"], st)
+                o["ativo"] = st
+                sw.configure(text="Ativa" if st else "Inativa")
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            switch_ativo.configure(command=_ao_toggle_obs)
+
+            # Célula 3: Ação única Excluir (🗑) com confirmação
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.grid(row=0, column=2, padx=4, sticky="e")
+            btn_frame.grid(row=0, column=2, padx=(4, 8), sticky="e")
 
-            ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda o=obs: self._editar_obs(o)).pack(side="left", padx=2)
+            btn_del = ctk.CTkButton(
+                btn_frame, text="🗑", width=34, height=28,
+                font=ctk.CTkFont(size=13),
+                fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR,
+                corner_radius=6, command=lambda o=obs: self._confirmar_remocao_obs(o)
+            )
+            btn_del.pack(side="left")
+            habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
 
-            novo_status = 0 if obs.get("ativo", 1) else 1
-            btn_txt = "Desativar" if obs.get("ativo", 1) else "Ativar"
-            btn_cor = COR_VERMELHO if obs.get("ativo", 1) else COR_VERDE
-            ctk.CTkButton(btn_frame, text=btn_txt, width=70, height=26, font=ctk.CTkFont(size=11), fg_color=btn_cor, corner_radius=6, command=lambda o=obs, st=novo_status: self._toggle_obs(o, st)).pack(side="left", padx=2)
-
-            ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda o=obs: self._excluir_obs(o)).pack(side="left", padx=2)
-
-    def _editar_obs(self, obs: dict):
-        self._obs_selecionada = obs
-        self._obs_texto.delete(0, "end")
-        self._obs_texto.insert(0, obs["texto"])
-        self._obs_ativo_var.set(bool(obs.get("ativo", 1)))
-        self._obs_status_lbl.configure(text=f"Editando: {obs['texto']}", text_color=COR_AZUL_POINT)
-
-    def _salvar_obs(self):
+    def _cadastrar_obs(self):
         texto = self._obs_texto.get().strip()
-        ativo = 1 if self._obs_ativo_var.get() else 0
 
         if not texto:
             self._obs_status_lbl.configure(text="⚠ Texto é obrigatório!", text_color=COR_VERMELHO)
             return
 
-        if self._obs_selecionada:
-            atualizar_observacao_padrao(self._obs_selecionada["id"], texto, ativo)
-            self._obs_status_lbl.configure(text=f"✅ '{texto}' atualizado!", text_color=COR_VERDE)
-        else:
-            adicionar_observacao_padrao(texto)
-            self._obs_status_lbl.configure(text=f"✅ '{texto}' adicionado!", text_color=COR_VERDE)
-
-        self._limpar_obs()
+        adicionar_observacao_padrao(texto)
+        self._limpar_form_obs()
         self._carregar_obs()
+        if self._on_refresh:
+            try:
+                self._on_refresh()
+            except Exception:
+                pass
+        self._obs_status_lbl.configure(text=f"✅ '{texto}' cadastrada!", text_color=COR_VERDE)
 
-    def _toggle_obs(self, obs: dict, novo_status: int):
-        atualizar_observacao_padrao(obs["id"], obs["texto"], novo_status)
-        self._carregar_obs()
-
-    def _excluir_obs(self, obs: dict):
-        remover_observacao_padrao(obs["id"])
-        self._carregar_obs()
-
-    def _limpar_obs(self):
-        self._obs_selecionada = None
+    def _limpar_form_obs(self):
         self._obs_texto.delete(0, "end")
-        self._obs_ativo_var.set(True)
         self._obs_status_lbl.configure(text="")
+
+    def _confirmar_remocao_obs(self, obs: dict):
+        def _exec():
+            remover_observacao_padrao(obs["id"])
+            self._carregar_obs()
+            if self._on_refresh:
+                try:
+                    self._on_refresh()
+                except Exception:
+                    pass
+
+        self._confirmar_dialogo(
+            "Excluir Observação",
+            f"Deseja realmente excluir a observação rápida '{obs['texto']}'?",
+            _exec,
+            icone="🗑"
+        )
 
     # ── ABA 5: IMPRESSORA (REDE E CABO USB) ────────────────────────────────────
 

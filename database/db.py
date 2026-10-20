@@ -332,6 +332,11 @@ def atualizar_adicional(adicional_id, nome, preco, ativo=1):
         )
 
 
+def remover_adicional(adicional_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM adicionais WHERE id=?", (adicional_id,))
+
+
 # ── Taxas de Entrega ──────────────────────────────────────────────────────────
 
 def listar_taxas(apenas_ativas=True):
