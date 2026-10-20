@@ -17,15 +17,20 @@ class ScreenCart(ctk.CTkFrame):
     """Tela 1 – Cardápio por categorias + Carrinho lateral."""
 
     def __init__(self, master, state: dict, on_next, on_admin,
-                 on_historico=None, on_balanco=None, **kwargs):
+                 on_historico=None, on_balanco=None, on_login=None, **kwargs):
         super().__init__(master, fg_color=COR_FUNDO, **kwargs)
         self._state        = state
         self._on_next      = on_next
         self._on_historico = on_historico
         self._on_balanco   = on_balanco
+        self._on_login     = on_login
         self._cat_atual    = None     # None = Todos
 
         self._build_ui(on_admin)
+        self._carregar_categorias()
+
+    def recarregar(self):
+        """Recarrega categorias e produtos da tela de cardápio."""
         self._carregar_categorias()
 
     # ── Construção da UI ──────────────────────────────────────────────────────
@@ -35,7 +40,8 @@ class ScreenCart(ctk.CTkFrame):
             self, "Cardápio",
             on_admin=on_admin,
             on_historico=self._on_historico,
-            on_balanco=self._on_balanco
+            on_balanco=self._on_balanco,
+            on_login=self._on_login
         )
         self._topbar.pack(fill="x")
 

@@ -297,10 +297,20 @@ Sempre que fizer alterações no código Python:
 
 ## 9. Roadmap / Débito Técnico Futuro
 
-### 9.1. Migração para Banco de Dados Online (Supabase)
-- **Persistência Local Atual como Contingência:**
-  A validação, persistência e contingência de banco de dados SQLite local (`%LOCALAPPDATA%/PointLanches/data/point_lanches.db`) é uma solução temporária de contingência offline/local para o PDV comercial.
-- **Diretriz de Transição para o Supabase (PostgreSQL em Nuvem):**
-  No momento em que for solicitada a migração para o Supabase:
-  1. A rotina de validação/cópia de banco local de inicialização e migração de arquivos locais deverá ser removida ou adaptada exclusivamente como cache local offline temporário (para operação ininterrupta do caixa em caso de perda de conexão de internet).
-  2. As operações de leitura e gravação de pedidos, cardápio, taxas e fechamento financeiro passarão a sincronizar diretamente com as tabelas do PostgreSQL no Supabase via API/SDK.
+### 9.1. Integração com Banco de Dados Online (Supabase Cloud) & Modo Offline-First (v1.1.1)
+- **Autenticação Segura & Controle de Acesso:**
+  - Tela inicial de autenticação (`ScreenAuth`) exibida antes da abertura do sistema:
+    - Autentica e-mail e senha diretamente no Supabase Auth (`/auth/v1/token?grant_type=password`).
+    - Opção "Lembrar login neste computador" que persiste a sessão com segurança em `%LOCALAPPDATA%/PointLanches/data/supabase_session.json`.
+    - Opção "Continuar Offline (Banco Local)" permitindo operação local imediata sem bloqueio.
+  - **Ícone Dinâmico no Cardápio (`TopBar`):**
+    - Em modo offline/deslogado, exibe botão `☁️ Conectar` ao lado das ações do cardápio (`📋`, `📊`, `⚙`).
+    - Quando o operador faz login e conecta com sucesso à nuvem, o botão de login **some automaticamente** via listener em tempo real.
+- **Segurança de Dados e RLS (Row Level Security):**
+  - RLS 100% ativo em todas as 12 tabelas no PostgreSQL do Supabase.
+  - Acesso liberado apenas para requisições autenticadas com token JWT válido emitido pelo projeto.
+  - Zero credenciais sensíveis no GitHub (`.env` estritamente ignorado no `.gitignore`).
+- **Arquitetura Resiliente Offline-First:**
+  - Gravação síncrona local imediata no SQLite (`point_lanches.db`): o caixa nunca trava nem depende da latência de internet para emitir cupons ou fechar pedidos.
+  - Envio assíncrono em segundo plano (`services/supabase_sync.py`) dos pedidos e itens fechados para as tabelas `public.pedidos` e `public.itens_pedido` no Supabase.
+  - Se a internet cair, o PDV opera ininterruptamente e mantém a integridade do caixa.

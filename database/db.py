@@ -714,6 +714,16 @@ def salvar_pedido(pedido: dict, itens: list) -> int:
                 item.get("observacao", ""),
                 item.get("categoria", ""),
             ))
+
+    # Sincronização em segundo plano com Supabase Cloud (não bloqueia a thread do caixa)
+    try:
+        from services.supabase_sync import enviar_pedido_supabase_async
+        pedido_sync = dict(pedido)
+        pedido_sync["numero"] = numero
+        enviar_pedido_supabase_async(pedido_sync, itens)
+    except Exception:
+        pass
+
     return pedido_id
 
 

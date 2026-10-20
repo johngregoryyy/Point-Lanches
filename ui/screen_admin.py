@@ -135,6 +135,26 @@ class ScreenAdmin(ctk.CTkToplevel):
         btn_importar.pack(side="right", padx=4)
         habilitar_feedback_clique(btn_importar, cor_flash="#475569")
 
+        # Botão de Logout da Nuvem se autenticado
+        try:
+            from services.supabase_auth import auth_manager
+            if auth_manager.is_authenticated():
+                email_usr = auth_manager.get_user_email()
+                txt_nuvem = f"☁️ Sair ({email_usr[:14]}...)" if len(email_usr) > 16 else f"☁️ Sair ({email_usr})"
+                btn_nuvem = ctk.CTkButton(
+                    header_top,
+                    text=txt_nuvem if email_usr else "☁️ Desconectar Nuvem",
+                    height=30,
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    fg_color="#7F1D1D", hover_color="#991B1B",
+                    corner_radius=6,
+                    command=self._desconectar_nuvem
+                )
+                btn_nuvem.pack(side="right", padx=4)
+                habilitar_feedback_clique(btn_nuvem, cor_flash="#DC2626")
+        except Exception:
+            pass
+
         btn_exportar = ctk.CTkButton(
             header_top,
             text="💾  Exportar Backup",
@@ -1846,6 +1866,16 @@ class ScreenAdmin(ctk.CTkToplevel):
                 f"Detalhes: {str(e)}"
             )
             self._mostrar_alerta("Falha ao Importar", msg_erro, icone="❌")
+
+    def _desconectar_nuvem(self):
+        """Encerra a sessão atual com o Supabase e retorna ao modo local."""
+        try:
+            from services.supabase_auth import auth_manager
+            auth_manager.logout()
+            self._mostrar_alerta("Sessão Encerrada", "Você foi desconectado da nuvem. O sistema continuará operando normalmente em modo offline local.", icone="📴")
+            self.destroy()
+        except Exception:
+            pass
 
     def _mostrar_alerta(self, titulo: str, mensagem: str, icone: str = "ℹ️"):
         win = ctk.CTkToplevel(self)

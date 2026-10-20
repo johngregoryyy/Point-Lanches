@@ -89,7 +89,8 @@ class App(ctk.CTk):
             on_next=lambda: self._mostrar("delivery"),
             on_admin=self._abrir_admin,
             on_historico=self._abrir_historico,
-            on_balanco=self._abrir_balanco
+            on_balanco=self._abrir_balanco,
+            on_login=self._abrir_login
         )
         self._telas["delivery"] = ScreenDelivery(
             container, state=self._state,
@@ -177,6 +178,25 @@ class App(ctk.CTk):
         historico = ScreenHistory(self)
         historico.focus()
 
+    def _abrir_login(self):
+        """Abre a janela de autenticação com o Supabase."""
+        from ui.screen_auth import ScreenAuth
+        auth_win = ScreenAuth(
+            self,
+            on_success=self._on_login_sucesso,
+            on_offline=self._on_login_offline
+        )
+        auth_win.focus()
+
+    def _on_login_sucesso(self):
+        """Callback acionado após login bem-sucedido."""
+        if hasattr(self, "_telas") and "cart" in self._telas:
+            self._telas["cart"].recarregar()
+
+    def _on_login_offline(self):
+        """Callback acionado quando o usuário opta por continuar offline."""
+        pass
+
     def _novo_pedido(self):
         """Reinicia o estado e volta ao cardápio."""
         self._reset_state()
@@ -227,9 +247,26 @@ def main():
     splash.update_status("Carregando catálogo e telas do PDV...")
     app.setup_ui()
 
-    # 6. Transição suave: fechar splash e exibir tela principal
-    splash.update_status("Pronto! Abrindo Point Lanches...")
-    app.after(350, lambda: (splash.close(), app.mostrar_janela_principal()))
+    # 6. Transição suave: fechar splash e autenticar ou abrir tela principal
+    from services.supabase_auth import auth_manager
+    from ui.screen_auth import ScreenAuth
+
+    def _iniciar_fluxo_autenticacao():
+        splash.close()
+        if auth_manager.is_authenticated():
+            # Já autenticado com sessão salva: abre direto
+            app.mostrar_janela_principal()
+        else:
+            # Não autenticado: exibe tela de login antes de abrir a tela principal
+            auth_modal = ScreenAuth(
+                app,
+                on_success=lambda: app.mostrar_janela_principal(),
+                on_offline=lambda: app.mostrar_janela_principal()
+            )
+            auth_modal.focus()
+
+    splash.update_status("Pronto!")
+    app.after(350, _iniciar_fluxo_autenticacao)
     app.mainloop()
 
 

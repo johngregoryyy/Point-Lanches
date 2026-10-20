@@ -317,10 +317,11 @@ class TopBar(ctk.CTkFrame):
     """Barra superior com logo, título e botões de ação."""
 
     def __init__(self, master, titulo: str,
-                 on_admin=None, on_historico=None, on_balanco=None, **kwargs):
+                 on_admin=None, on_historico=None, on_balanco=None, on_login=None, **kwargs):
         super().__init__(master, height=48, corner_radius=0,
                          fg_color=COR_CINZA_BARRA, **kwargs)
         self.pack_propagate(False)
+        self._on_login = on_login
 
         logo_frame = ctk.CTkFrame(self, fg_color="transparent")
         logo_frame.pack(side="left", padx=14)
@@ -382,3 +383,43 @@ class TopBar(ctk.CTkFrame):
             )
             btn_hist.pack(side="right", padx=3)
             habilitar_feedback_clique(btn_hist, cor_flash="#475569", debounce_ms=250)
+
+        # Botão de Login / Conectar Nuvem (visível em modo offline, oculto quando logado)
+        self._btn_cloud_login = ctk.CTkButton(
+            self, text="☁️ Conectar", width=96, height=30,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#0369A1", hover_color="#0284C7",
+            corner_radius=6,
+            command=self._disparar_login
+        )
+        habilitar_feedback_clique(self._btn_cloud_login, cor_flash="#38BDF8", debounce_ms=250)
+
+        # Listener para auto-ocultação quando logado no Supabase
+        try:
+            from services.supabase_auth import auth_manager
+            auth_manager.add_auth_listener(self.atualizar_status_auth)
+            self.atualizar_status_auth(auth_manager.is_authenticated())
+        except Exception:
+            self._btn_cloud_login.pack(side="right", padx=5)
+
+    def _disparar_login(self):
+        if self._on_login:
+            self._on_login()
+
+    def atualizar_status_auth(self, logado: bool = None):
+        """Atualiza a visibilidade do botão de login: caso esteja logado, o ícone SOME."""
+        if logado is None:
+            try:
+                from services.supabase_auth import auth_manager
+                logado = auth_manager.is_authenticated()
+            except Exception:
+                logado = False
+
+        if logado:
+            # Caso esteja logado, o ícone SOME
+            if self._btn_cloud_login.winfo_ismapped():
+                self._btn_cloud_login.pack_forget()
+        else:
+            # Caso esteja offline, exibe o ícone de login junto aos outros botões
+            if not self._btn_cloud_login.winfo_ismapped() and self._on_login:
+                self._btn_cloud_login.pack(side="right", padx=5)

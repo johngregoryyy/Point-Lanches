@@ -12,6 +12,10 @@ GITHUB_REPO  = "Point-Lanches"       # Nome do repositório no GitHub
 CHECK_UPDATES_ON_STARTUP = True      # Verifica atualizações automaticamente ao iniciar
 UPDATE_CHECK_TIMEOUT = 5             # Timeout em segundos para requisições à API
 
+# --- Configurações Supabase Cloud (Offline-First com Autenticação) ---
+SUPABASE_URL_DEFAULT = "https://gghvzecjfbyxbrjdpgam.supabase.co"
+SUPABASE_KEY_DEFAULT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdnaHZ6ZWNqZmJ5eGJyamRwZ2FtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1MTY5NzgsImV4cCI6MjEwODA5Mjk3OH0.T0PfmfR7pKhf8l0HLFjZc3fX0nBPiKf2JLK6Apc8f-E"
+
 # --- Impressora Elgin i8 ---
 PRINTER_TIPO_DEFAULT = "rede"       # "rede" (TCP/IP porta 9100) ou "usb" (Cabo USB Spooler)
 PRINTER_IP_DEFAULT   = "192.168.1.100"
