@@ -317,3 +317,13 @@ Sempre que fizer alterações no código Python:
   - Zero credenciais sensíveis no GitHub (`.env` estritamente ignorado no `.gitignore`).
 - **Sincronização Assíncrona de Pedidos:**
   - Ao finalizar uma venda, o pedido é salvo imediatamente no SQLite local (tempo de resposta instantâneo para emissão de cupom) e enviado em background para o Supabase sem bloquear a UI.
+
+### 9.2. Sincronização em Tempo Real, Botão Manual de Sync e Fechamento Seguro (v1.1.3)
+- **Sincronização Bidirecional CRUD:**
+  - Todas as alterações feitas pelo operador no painel administrativo (`adicionar/atualizar/remover_categoria`, `adicionar/atualizar/remover_produto`, `adicionar/atualizar/remover_adicional`, `adicionar/atualizar/remover_taxa`, `adicionar/atualizar/remover_observacao_padrao`, `cadastrar_rua_se_inedita`) disparam operações assíncronas imediatas (`POST`, `PATCH`, `DELETE`) para o Supabase REST, eliminando o problema de categorias e itens deletados reaparecerem após novas sincronizações.
+- **Botão Manual de Sincronização no Cardápio (`🔄`):**
+  - Adicionado à `TopBar` ao lado dos demais atalhos. Ao ser acionado, dispara sincronização bidirecional em segundo plano (envio de pedidos pendentes e download de dados atualizados da nuvem) com feedback tátil e visual (`⏳` -> `✅` -> `🔄`) e recarregamento automático dos dados da tela.
+- **Sincronização Automática ao Fechar (`WM_DELETE_WINDOW`):**
+  - O fechamento da aplicação intercepta o evento do Windows, oculta instantaneamente a janela (`withdraw`) e executa uma sincronização final segura com o Supabase antes da destruição dos recursos (`destroy`), assegurando que nenhum pedido ou alteração fique retido apenas localmente.
+- **Correção Visual da Tela de Login (`ScreenAuth`):**
+  - Reorganização e compactação de espaçamentos verticais e campos de entrada para 34px, garantindo que o botão "Continuar Offline (Banco Local)" fique perfeitamente visível em todas as escalas DPI do Windows.

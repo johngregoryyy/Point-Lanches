@@ -510,10 +510,22 @@ def listar_produtos(categoria_id=None):
 
 def adicionar_produto(categoria_id, nome, descricao, preco):
     with get_connection() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO produtos (categoria_id, nome, descricao, preco) VALUES (?,?,?,?)",
             (categoria_id, nome, descricao, preco)
         )
+        prod_id = cur.lastrowid
+
+    if prod_id:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async("produtos", {
+                "id": prod_id, "categoria_id": categoria_id, "nome": nome,
+                "descricao": descricao, "preco": preco, "ativo": 1
+            }, metodo="POST")
+        except Exception:
+            pass
+    return prod_id
 
 
 def atualizar_produto(produto_id, nome, descricao, preco, categoria_id, ativo=1):
@@ -522,16 +534,41 @@ def atualizar_produto(produto_id, nome, descricao, preco, categoria_id, ativo=1)
             "UPDATE produtos SET nome=?, descricao=?, preco=?, categoria_id=?, ativo=? WHERE id=?",
             (nome, descricao, preco, categoria_id, ativo, produto_id)
         )
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("produtos", {
+            "nome": nome, "descricao": descricao, "preco": preco,
+            "categoria_id": categoria_id, "ativo": ativo
+        }, metodo="PATCH", query_params=f"id=eq.{produto_id}")
+    except Exception:
+        pass
 
 
 def remover_produto(produto_id):
     with get_connection() as conn:
         conn.execute("UPDATE produtos SET ativo=0 WHERE id=?", (produto_id,))
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("produtos", {"ativo": 0}, metodo="PATCH", query_params=f"id=eq.{produto_id}")
+    except Exception:
+        pass
 
 
 def adicionar_categoria(nome, ordem=0):
     with get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO categorias (nome, ordem) VALUES (?, ?)", (nome, ordem))
+        cur = conn.execute("INSERT OR IGNORE INTO categorias (nome, ordem) VALUES (?, ?)", (nome, ordem))
+        cat_id = cur.lastrowid
+        if not cat_id or cat_id == 0:
+            r = conn.execute("SELECT id FROM categorias WHERE nome=?", (nome,)).fetchone()
+            cat_id = r["id"] if r else None
+
+    if cat_id:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async("categorias", {"id": cat_id, "nome": nome, "ordem": ordem}, metodo="POST")
+        except Exception:
+            pass
+    return cat_id
 
 
 def atualizar_categoria(categoria_id, novo_nome, nova_ordem=None):
@@ -541,11 +578,19 @@ def atualizar_categoria(categoria_id, novo_nome, nova_ordem=None):
                 "UPDATE categorias SET nome=?, ordem=? WHERE id=?",
                 (novo_nome, nova_ordem, categoria_id)
             )
+            payload = {"nome": novo_nome, "ordem": nova_ordem}
         else:
             conn.execute(
                 "UPDATE categorias SET nome=? WHERE id=?",
                 (novo_nome, categoria_id)
             )
+            payload = {"nome": novo_nome}
+
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("categorias", payload, metodo="PATCH", query_params=f"id=eq.{categoria_id}")
+    except Exception:
+        pass
 
 
 def contar_produtos_por_categoria(categoria_id: int, apenas_ativos: bool = False) -> int:
@@ -560,6 +605,11 @@ def contar_produtos_por_categoria(categoria_id: int, apenas_ativos: bool = False
 def remover_categoria(categoria_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM categorias WHERE id=?", (categoria_id,))
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("categorias", None, metodo="DELETE", query_params=f"id=eq.{categoria_id}")
+    except Exception:
+        pass
 
 
 def get_categoria_por_nome(nome):
@@ -583,10 +633,18 @@ def listar_adicionais(apenas_ativos=True):
 
 def adicionar_adicional(nome, preco):
     with get_connection() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO adicionais (nome, preco) VALUES (?,?)",
             (nome, preco)
         )
+        adic_id = cur.lastrowid
+    if adic_id:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async("adicionais", {"id": adic_id, "nome": nome, "preco": preco, "ativo": 1}, metodo="POST")
+        except Exception:
+            pass
+    return adic_id
 
 
 def atualizar_adicional(adicional_id, nome, preco, ativo=1):
@@ -595,11 +653,21 @@ def atualizar_adicional(adicional_id, nome, preco, ativo=1):
             "UPDATE adicionais SET nome=?, preco=?, ativo=? WHERE id=?",
             (nome, preco, ativo, adicional_id)
         )
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("adicionais", {"nome": nome, "preco": preco, "ativo": ativo}, metodo="PATCH", query_params=f"id=eq.{adicional_id}")
+    except Exception:
+        pass
 
 
 def remover_adicional(adicional_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM adicionais WHERE id=?", (adicional_id,))
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("adicionais", None, metodo="DELETE", query_params=f"id=eq.{adicional_id}")
+    except Exception:
+        pass
 
 
 # ── Taxas de Entrega ──────────────────────────────────────────────────────────
@@ -616,10 +684,18 @@ def listar_taxas(apenas_ativas=True):
 def adicionar_taxa(valor, label, ativo=1):
     ordem = int(valor * 100)
     with get_connection() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO taxas_entrega (valor, label, ativo, ordem) VALUES (?,?,?,?)",
             (valor, label, ativo, ordem)
         )
+        taxa_id = cur.lastrowid
+    if taxa_id:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async("taxas_entrega", {"id": taxa_id, "valor": valor, "label": label, "ativo": ativo, "ordem": ordem}, metodo="POST")
+        except Exception:
+            pass
+    return taxa_id
 
 
 def atualizar_taxa(taxa_id, valor, label, ativo=1):
@@ -628,11 +704,21 @@ def atualizar_taxa(taxa_id, valor, label, ativo=1):
             "UPDATE taxas_entrega SET valor=?, label=?, ativo=? WHERE id=?",
             (valor, label, ativo, taxa_id)
         )
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("taxas_entrega", {"valor": valor, "label": label, "ativo": ativo}, metodo="PATCH", query_params=f"id=eq.{taxa_id}")
+    except Exception:
+        pass
 
 
 def remover_taxa(taxa_id):
     with get_connection() as conn:
         conn.execute("DELETE FROM taxas_entrega WHERE id=?", (taxa_id,))
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("taxas_entrega", None, metodo="DELETE", query_params=f"id=eq.{taxa_id}")
+    except Exception:
+        pass
 
 
 # ── Pedidos ───────────────────────────────────────────────────────────────────
@@ -894,10 +980,18 @@ def listar_observacoes_padrao(apenas_ativas=True):
 
 def adicionar_observacao_padrao(texto):
     with get_connection() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO observacoes_padrao (texto) VALUES (?)",
             (texto,)
         )
+        obs_id = cur.lastrowid
+    if obs_id:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async("observacoes_padrao", {"id": obs_id, "texto": texto, "ativo": 1}, metodo="POST")
+        except Exception:
+            pass
+    return obs_id
 
 
 def atualizar_observacao_padrao(obs_id, texto, ativo=1):
@@ -906,11 +1000,21 @@ def atualizar_observacao_padrao(obs_id, texto, ativo=1):
             "UPDATE observacoes_padrao SET texto=?, ativo=? WHERE id=?",
             (texto, ativo, obs_id)
         )
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("observacoes_padrao", {"texto": texto, "ativo": ativo}, metodo="PATCH", query_params=f"id=eq.{obs_id}")
+    except Exception:
+        pass
 
 
 def remover_observacao_padrao(obs_id):
     with get_connection() as conn:
         conn.execute("DELETE FROM observacoes_padrao WHERE id=?", (obs_id,))
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("observacoes_padrao", None, metodo="DELETE", query_params=f"id=eq.{obs_id}")
+    except Exception:
+        pass
 
 
 # ── Ruas de Dois Irmãos e GeoJSON ─────────────────────────────────────────────
@@ -1270,6 +1374,12 @@ def cadastrar_rua_se_inedita(nome: str, bairro: str = "", taxa: float = 0.0) -> 
         if nome_formatado not in RUAS_DOIS_IRMAOS:
             RUAS_DOIS_IRMAOS.append(nome_formatado)
             RUAS_DOIS_IRMAOS.sort()
+    except Exception:
+        pass
+
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("ruas", nova_rua, metodo="POST")
     except Exception:
         pass
 

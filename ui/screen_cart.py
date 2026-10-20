@@ -17,13 +17,14 @@ class ScreenCart(ctk.CTkFrame):
     """Tela 1 – Cardápio por categorias + Carrinho lateral."""
 
     def __init__(self, master, state: dict, on_next, on_admin,
-                 on_historico=None, on_balanco=None, on_login=None, **kwargs):
+                 on_historico=None, on_balanco=None, on_login=None, on_sync=None, **kwargs):
         super().__init__(master, fg_color=COR_FUNDO, **kwargs)
         self._state        = state
         self._on_next      = on_next
         self._on_historico = on_historico
         self._on_balanco   = on_balanco
         self._on_login     = on_login
+        self._on_sync      = on_sync
         self._cat_atual    = None     # None = Todos
 
         self._build_ui(on_admin)
@@ -33,6 +34,12 @@ class ScreenCart(ctk.CTkFrame):
         """Recarrega categorias e produtos da tela de cardápio."""
         self._carregar_categorias()
 
+    def _ao_sincronizar(self):
+        """Atualiza a tela de cardápio após sincronização com o banco."""
+        self.recarregar()
+        if self._on_sync:
+            self._on_sync()
+
     # ── Construção da UI ──────────────────────────────────────────────────────
 
     def _build_ui(self, on_admin):
@@ -41,7 +48,8 @@ class ScreenCart(ctk.CTkFrame):
             on_admin=on_admin,
             on_historico=self._on_historico,
             on_balanco=self._on_balanco,
-            on_login=self._on_login
+            on_login=self._on_login,
+            on_sync=self._ao_sincronizar
         )
         self._topbar.pack(fill="x")
 

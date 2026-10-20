@@ -317,11 +317,12 @@ class TopBar(ctk.CTkFrame):
     """Barra superior com logo, título e botões de ação."""
 
     def __init__(self, master, titulo: str,
-                 on_admin=None, on_historico=None, on_balanco=None, on_login=None, **kwargs):
+                 on_admin=None, on_historico=None, on_balanco=None, on_login=None, on_sync=None, **kwargs):
         super().__init__(master, height=48, corner_radius=0,
                          fg_color=COR_CINZA_BARRA, **kwargs)
         self.pack_propagate(False)
         self._on_login = on_login
+        self._on_sync = on_sync
 
         logo_frame = ctk.CTkFrame(self, fg_color="transparent")
         logo_frame.pack(side="left", padx=14)
@@ -384,6 +385,18 @@ class TopBar(ctk.CTkFrame):
             btn_hist.pack(side="right", padx=3)
             habilitar_feedback_clique(btn_hist, cor_flash="#475569", debounce_ms=250)
 
+        # Botão de Sincronização manual com Supabase
+        if on_sync:
+            self._btn_sync = ctk.CTkButton(
+                self, text="🔄", width=38, height=32,
+                font=ctk.CTkFont(size=16),
+                fg_color="transparent",
+                hover_color="#3A3A3A",
+                command=self._disparar_sync
+            )
+            self._btn_sync.pack(side="right", padx=3)
+            habilitar_feedback_clique(self._btn_sync, cor_flash="#475569", debounce_ms=1000)
+
         # Botão de Login / Conectar Nuvem (visível em modo offline, oculto quando logado)
         self._btn_cloud_login = ctk.CTkButton(
             self, text="☁️ Conectar", width=96, height=30,
@@ -401,6 +414,34 @@ class TopBar(ctk.CTkFrame):
             self.atualizar_status_auth(auth_manager.is_authenticated())
         except Exception:
             self._btn_cloud_login.pack(side="right", padx=5)
+
+    def _disparar_sync(self):
+        """Dispara sincronização bidirecional em segundo plano com feedback visual."""
+        if not hasattr(self, "_btn_sync"):
+            return
+        self._btn_sync.configure(text="⏳", state="disabled")
+
+        def _worker():
+            try:
+                from services.supabase_sync import sincronizar_tudo_com_supabase
+                sincronizar_tudo_com_supabase(timeout=6)
+            except Exception as e:
+                print(f"Erro ao sincronizar manualmente: {e}")
+
+            def _update_ui():
+                if self.winfo_exists() and hasattr(self, "_btn_sync"):
+                    self._btn_sync.configure(text="✅")
+                    self.after(1200, lambda: self._btn_sync.configure(text="🔄", state="normal") if self.winfo_exists() and hasattr(self, "_btn_sync") else None)
+                if self._on_sync:
+                    self._on_sync()
+
+            try:
+                self.after(0, _update_ui)
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _disparar_login(self):
         if self._on_login:

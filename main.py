@@ -69,6 +69,9 @@ class App(ctk.CTk):
         self._reset_state()
         self._telas: dict[str, ctk.CTkFrame] = {}
 
+        # ── Sincronização automática com Supabase ao fechar a janela ──────────
+        self.protocol("WM_DELETE_WINDOW", self._ao_fechar_aplicacao)
+
         if not start_hidden:
             self.setup_ui()
             self.mostrar_janela_principal()
@@ -90,7 +93,8 @@ class App(ctk.CTk):
             on_admin=self._abrir_admin,
             on_historico=self._abrir_historico,
             on_balanco=self._abrir_balanco,
-            on_login=self._abrir_login
+            on_login=self._abrir_login,
+            on_sync=self._recarregar_dados_sistema
         )
         self._telas["delivery"] = ScreenDelivery(
             container, state=self._state,
@@ -234,6 +238,17 @@ class App(ctk.CTk):
             "valor_pago":    0.0,
             "troco":         0.0,
         })
+
+    def _ao_fechar_aplicacao(self):
+        """Sincroniza pedidos pendentes e dados com o Supabase antes de encerrar o aplicativo."""
+        try:
+            self.withdraw()  # Oculta a janela de imediato para fechamento visual instantâneo
+            from services.supabase_sync import sincronizar_tudo_com_supabase
+            sincronizar_tudo_com_supabase(timeout=4)
+        except Exception as e:
+            print(f"Aviso na sincronização ao fechar: {e}")
+        finally:
+            self.destroy()
 
 
 # ── Ponto de entrada ──────────────────────────────────────────────────────────
