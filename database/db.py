@@ -451,13 +451,16 @@ def excluir_pedido(pedido_id: int) -> bool:
 
 # ── Balanço Geral e Fechamento ────────────────────────────────────────────────
 
-def calcular_balanco_mensal(mes: int, ano: int) -> dict:
+def calcular_balanco_mensal(mes: int = None, ano: int = None) -> dict:
     """
-    Calcula o faturamento e balanço consolidado de um mês/ano específico.
+    Calcula o faturamento e balanço consolidado de um mês/ano específico ou do ano completo.
     Retorna indicadores gerais, detalhamento por modalidade e estrutura
     preparada para custos/insumos futuros.
     """
-    prefix = f"{ano:04d}-{mes:02d}%"
+    if mes and mes > 0:
+        prefix = f"{ano:04d}-{mes:02d}%"
+    else:
+        prefix = f"{ano:04d}-%"
     with get_connection() as conn:
         pedidos = conn.execute("""
             SELECT id, numero, total, subtotal, taxa_entrega, forma_pgto, criado_em
@@ -518,6 +521,35 @@ def calcular_balanco_mensal(mes: int, ano: int) -> dict:
             "lucro_bruto": lucro_bruto,
             "modalidades": modalidades,
         }
+
+
+def ranking_produtos_vendidos(mes: int = None, ano: int = None) -> list[dict]:
+    """
+    Retorna o ranking de produtos vendidos no período (mês/ano ou ano completo),
+    ordenado decrescentemente pela quantidade total vendida.
+    """
+    if mes and mes > 0:
+        prefix = f"{ano:04d}-{mes:02d}%"
+    else:
+        prefix = f"{ano:04d}-%"
+
+    with get_connection() as conn:
+        q = """
+            SELECT 
+                ip.nome as produto_nome,
+                COALESCE(c.nome, ip.categoria, 'Diversos') as categoria_nome,
+                SUM(ip.quantidade) as total_qtd,
+                SUM(ip.quantidade * ip.preco_unit) as total_valor
+            FROM itens_pedido ip
+            JOIN pedidos p ON ip.pedido_id = p.id
+            LEFT JOIN produtos prod ON ip.produto_id = prod.id
+            LEFT JOIN categorias c ON prod.categoria_id = c.id
+            WHERE p.criado_em LIKE ?
+            GROUP BY ip.nome
+            ORDER BY total_qtd DESC, total_valor DESC
+        """
+        rows = conn.execute(q, (prefix,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 

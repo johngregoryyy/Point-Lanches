@@ -269,20 +269,22 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=3)
-        header.columnconfigure(1, weight=1)
-        header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=0)
+        header.columnconfigure(0, weight=3, minsize=180)
+        header.columnconfigure(1, weight=0, minsize=140)
+        header.columnconfigure(2, weight=0, minsize=100)
+        header.columnconfigure(3, weight=0, minsize=50)
 
-        for col, txt in enumerate(["Nome do Produto (clique para editar)", "Categoria", "Preço (R$)", "Ação"]):
-            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w" if col < 3 else "e")
+        ctk.CTkLabel(header, text="Nome do Produto (clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Categoria", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Preço (R$)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=6, pady=6, sticky="e")
+        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(4, 8), pady=6, sticky="e")
 
         self._tabela_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._tabela_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-        self._tabela_scroll.columnconfigure(0, weight=3)
-        self._tabela_scroll.columnconfigure(1, weight=1)
-        self._tabela_scroll.columnconfigure(2, weight=1)
-        self._tabela_scroll.columnconfigure(3, weight=0)
+        self._tabela_scroll.columnconfigure(0, weight=3, minsize=180)
+        self._tabela_scroll.columnconfigure(1, weight=0, minsize=140)
+        self._tabela_scroll.columnconfigure(2, weight=0, minsize=100)
+        self._tabela_scroll.columnconfigure(3, weight=0, minsize=50)
 
         # Form lateral estritamente para adicionar novos produtos
         form = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
@@ -334,9 +336,9 @@ class ScreenAdmin(ctk.CTkToplevel):
         ctk.CTkLabel(
             form,
             text="💡 Edição Rápida:\n"
-                 "    Altere Nome ou Preço diretamente\n"
-                 "    na tabela ao lado e aperte Enter.\n"
-                 "    O sistema salva na hora!",
+                 "    • Altere Nome ou Preço na tabela (Enter para salvar)\n"
+                 "    • Troque de Categoria diretamente na setinha dropdown\n"
+                 "    O sistema salva no SQLite instantaneamente!",
             font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
         ).pack(anchor="w", padx=14, pady=(16, 0))
 
@@ -345,14 +347,18 @@ class ScreenAdmin(ctk.CTkToplevel):
             w.destroy()
 
         produtos = listar_produtos()
+        categorias_db = listar_categorias(incluir_extras=True)
+        cat_nomes = [c["nome"] for c in categorias_db]
+        cat_map = {c["nome"]: c["id"] for c in categorias_db}
+
         for i, prod in enumerate(produtos):
             bg = "#272727" if i % 2 == 0 else "#222222"
             row = ctk.CTkFrame(self._tabela_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=3)
-            row.columnconfigure(1, weight=1)
-            row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=0)
+            row.columnconfigure(0, weight=3, minsize=180)
+            row.columnconfigure(1, weight=0, minsize=140)
+            row.columnconfigure(2, weight=0, minsize=100)
+            row.columnconfigure(3, weight=0, minsize=50)
 
             # Célula 1: Nome do produto (editável inline)
             entry_nome = ctk.CTkEntry(
@@ -380,8 +386,36 @@ class ScreenAdmin(ctk.CTkToplevel):
             entry_nome.bind("<Return>", _ao_mudar_nome)
             entry_nome.bind("<FocusOut>", _ao_mudar_nome)
 
-            # Célula 2: Categoria
-            ctk.CTkLabel(row, text=prod["categoria"], font=ctk.CTkFont(size=12), anchor="w", text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, sticky="w")
+            # Célula 2: Categoria via Dropdown (CTkOptionMenu com setinha)
+            cur_cat = prod.get("categoria", "")
+            if cur_cat not in cat_nomes and cat_nomes:
+                cur_cat = cat_nomes[0]
+            var_cat = ctk.StringVar(value=cur_cat)
+
+            opt_cat = ctk.CTkOptionMenu(
+                row, variable=var_cat, values=cat_nomes,
+                width=135, height=30, font=ctk.CTkFont(size=11),
+                fg_color="#222834", button_color="#333E52", button_hover_color="#475569",
+                dropdown_fg_color="#1A202C", dynamic_resizing=False
+            )
+            opt_cat.grid(row=0, column=1, padx=6, pady=4, sticky="w")
+
+            def _ao_mudar_cat(nova_cat, p=prod, cmap=cat_map, opt=opt_cat):
+                n_id = cmap.get(nova_cat)
+                if not n_id or n_id == p.get("categoria_id"):
+                    return
+                atualizar_produto(p["id"], p["nome"], p.get("descricao", ""), p["preco"], n_id, p.get("ativo", 1))
+                p["categoria_id"] = n_id
+                p["categoria"] = nova_cat
+                opt.configure(fg_color=COR_VERDE)
+                self.after(600, lambda: opt.configure(fg_color="#222834") if opt.winfo_exists() else None)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            opt_cat.configure(command=_ao_mudar_cat)
 
             # Célula 3: Preço (editável inline)
             entry_preco = ctk.CTkEntry(
@@ -507,27 +541,29 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=1)
-        header.columnconfigure(1, weight=2)
-        header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=1)
+        header.columnconfigure(0, weight=0, minsize=65)
+        header.columnconfigure(1, weight=3, minsize=180)
+        header.columnconfigure(2, weight=1, minsize=140)
+        header.columnconfigure(3, weight=0, minsize=50)
 
-        for col, txt in enumerate(["Ordem", "Nome da Categoria", "Produtos Vinculados", "Ações"]):
-            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ordem", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6, sticky="center")
+        ctk.CTkLabel(header, text="Nome da Categoria (clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Produtos Vinculados", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(4, 8), pady=6, sticky="e")
 
         self._cat_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._cat_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-        self._cat_scroll.columnconfigure(0, weight=1)
-        self._cat_scroll.columnconfigure(1, weight=2)
-        self._cat_scroll.columnconfigure(2, weight=1)
-        self._cat_scroll.columnconfigure(3, weight=1)
+        self._cat_scroll.columnconfigure(0, weight=0, minsize=65)
+        self._cat_scroll.columnconfigure(1, weight=3, minsize=180)
+        self._cat_scroll.columnconfigure(2, weight=1, minsize=140)
+        self._cat_scroll.columnconfigure(3, weight=0, minsize=50)
 
-        # Form lateral categorias
+        # Form lateral categorias (focado estritamente em novos cadastros)
         form_cat = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
         form_cat.grid(row=0, column=1, sticky="nsew")
         form_cat.pack_propagate(False)
 
-        ctk.CTkLabel(form_cat, text="GERENCIAR CATEGORIA", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
+        ctk.CTkLabel(form_cat, text="ADICIONAR NOVA CATEGORIA", font=ctk.CTkFont(size=13, weight="bold"), text_color=COR_TEXTO_SUAVE).pack(pady=(14, 8), padx=14, anchor="w")
 
         ctk.CTkLabel(form_cat, text="Nome da Categoria", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._cat_nome = ctk.CTkEntry(form_cat, height=36, font=ctk.CTkFont(size=13), placeholder_text="Ex: Lanches, Bebidas...")
@@ -537,20 +573,20 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._cat_ordem = ctk.CTkEntry(form_cat, height=36, font=ctk.CTkFont(size=13), placeholder_text="0 (Prioridade na fila)")
         self._cat_ordem.pack(fill="x", padx=14, pady=(2, 14))
 
-        btn_salvar_cat = ctk.CTkButton(
-            form_cat, text="💾  Salvar Categoria", height=40,
+        btn_cadastrar_cat = ctk.CTkButton(
+            form_cat, text="➕  Cadastrar Categoria", height=40,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=COR_VERDE, hover_color=COR_VERDE_HVR, corner_radius=8,
-            command=self._salvar_categoria
+            command=self._cadastrar_categoria
         )
-        btn_salvar_cat.pack(fill="x", padx=14, pady=(0, 6))
-        habilitar_feedback_clique(btn_salvar_cat, cor_flash="#10B981")
+        btn_cadastrar_cat.pack(fill="x", padx=14, pady=(0, 6))
+        habilitar_feedback_clique(btn_cadastrar_cat, cor_flash="#10B981")
 
         btn_limpar_cat = ctk.CTkButton(
-            form_cat, text="➕  Nova / Limpar", height=36,
+            form_cat, text="Limpar Campos", height=36,
             font=ctk.CTkFont(size=12),
             fg_color="#444", hover_color="#555", corner_radius=8,
-            command=self._limpar_categoria
+            command=self._limpar_form_categoria
         )
         btn_limpar_cat.pack(fill="x", padx=14, pady=(0, 6))
         habilitar_feedback_clique(btn_limpar_cat, cor_flash="#666666")
@@ -561,10 +597,10 @@ class ScreenAdmin(ctk.CTkToplevel):
         # Dica explicativa
         ctk.CTkLabel(
             form_cat,
-            text="💡 A ordem numérica define a posição\n"
-                 "    no cardápio (0 aparece primeiro).\n"
-                 "    Categorias com produtos vinculados\n"
-                 "    possuem proteção contra exclusão.",
+            text="💡 Edição Rápida:\n"
+                 "    • Altere o Nome ou a Ordem direto na tabela (Enter salva)\n"
+                 "    • A ordem 0 aparece primeiro no cardápio\n"
+                 "    • Categorias com produtos possuem proteção contra exclusão.",
             font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
         ).pack(anchor="w", padx=14, pady=(16, 0))
 
@@ -577,42 +613,92 @@ class ScreenAdmin(ctk.CTkToplevel):
         categorias = listar_categorias(incluir_extras=True)
         for i, cat in enumerate(categorias):
             bg = "#272727" if i % 2 == 0 else "#222222"
-            row = ctk.CTkFrame(self._cat_scroll, fg_color=bg, corner_radius=6, height=38)
+            row = ctk.CTkFrame(self._cat_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=1)
-            row.columnconfigure(1, weight=2)
-            row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=1)
+            row.columnconfigure(0, weight=0, minsize=65)
+            row.columnconfigure(1, weight=3, minsize=180)
+            row.columnconfigure(2, weight=1, minsize=140)
+            row.columnconfigure(3, weight=0, minsize=50)
 
-            ordem_val = cat.get("ordem", 0)
-            ctk.CTkLabel(row, text=f"#{ordem_val}", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_AZUL_POINT, anchor="w").grid(row=0, column=0, padx=8, sticky="w")
-            ctk.CTkLabel(row, text=cat["nome"], font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+            # Célula 0: Ordem (editável inline)
+            entry_ordem = ctk.CTkEntry(
+                row, width=50, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#181818", border_width=1, border_color="#3A3A3A",
+                justify="center"
+            )
+            entry_ordem.insert(0, str(cat.get("ordem", 0)))
+            entry_ordem.grid(row=0, column=0, padx=6, pady=4, sticky="center")
 
+            def _ao_mudar_ordem(event, c=cat, w=entry_ordem):
+                val_raw = w.get().strip()
+                try:
+                    nova_ordem = int(val_raw) if val_raw else 0
+                except ValueError:
+                    w.delete(0, "end")
+                    w.insert(0, str(c.get("ordem", 0)))
+                    return
+                if nova_ordem == c.get("ordem", 0):
+                    return
+                atualizar_categoria(c["id"], c["nome"], nova_ordem)
+                c["ordem"] = nova_ordem
+                self._flash_entry_salvo(w, border_normal="#3A3A3A", border_flash=COR_VERDE)
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            entry_ordem.bind("<Return>", _ao_mudar_ordem)
+            entry_ordem.bind("<FocusOut>", _ao_mudar_ordem)
+
+            # Célula 1: Nome da Categoria (editável inline)
+            entry_nome = ctk.CTkEntry(
+                row, height=30, font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#1E1E1E", border_width=1, border_color="#333333"
+            )
+            entry_nome.insert(0, cat["nome"])
+            entry_nome.grid(row=0, column=1, padx=6, pady=4, sticky="ew")
+
+            def _ao_mudar_nome_cat(event, c=cat, w=entry_nome):
+                novo_nome = w.get().strip()
+                if not novo_nome or novo_nome == c["nome"]:
+                    w.delete(0, "end")
+                    w.insert(0, c["nome"])
+                    return
+                atualizar_categoria(c["id"], novo_nome, c.get("ordem", 0))
+                c["nome"] = novo_nome
+                self._flash_entry_salvo(w, border_normal="#333333", border_flash=COR_VERDE)
+                self._atualizar_combobox_categorias()
+                if hasattr(self, "_carregar_produtos"):
+                    self._carregar_produtos()
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            entry_nome.bind("<Return>", _ao_mudar_nome_cat)
+            entry_nome.bind("<FocusOut>", _ao_mudar_nome_cat)
+
+            # Célula 2: Produtos Vinculados
             qtd_prods = contar_produtos_por_categoria(cat["id"])
             cor_qtd = COR_VERDE if qtd_prods > 0 else COR_TEXTO_SUAVE
             txt_qtd = f"{qtd_prods} produto(s)" if qtd_prods > 0 else "Nenhum produto"
-            ctk.CTkLabel(row, text=txt_qtd, font=ctk.CTkFont(size=11), text_color=cor_qtd, anchor="w").grid(row=0, column=2, padx=8, sticky="w")
+            ctk.CTkLabel(row, text=txt_qtd, font=ctk.CTkFont(size=11), text_color=cor_qtd, anchor="w").grid(row=0, column=2, padx=6, sticky="w")
 
+            # Célula 3: Ação única Excluir (🗑) com diálogo e validação relacional
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.grid(row=0, column=3, padx=4, sticky="e")
-
-            btn_edit = ctk.CTkButton(btn_frame, text="✏", width=30, height=26, font=ctk.CTkFont(size=13), fg_color="#444", hover_color="#555", corner_radius=6, command=lambda c=cat: self._editar_categoria(c))
-            btn_edit.pack(side="left", padx=2)
-            habilitar_feedback_clique(btn_edit, cor_flash="#666666")
-
-            btn_del = ctk.CTkButton(btn_frame, text="🗑", width=30, height=26, font=ctk.CTkFont(size=13), fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR, corner_radius=6, command=lambda c=cat: self._tentar_excluir_categoria(c))
-            btn_del.pack(side="left", padx=2)
+            btn_frame.grid(row=0, column=3, padx=(4, 8), sticky="e")
+            btn_del = ctk.CTkButton(
+                btn_frame, text="🗑", width=34, height=28,
+                font=ctk.CTkFont(size=13),
+                fg_color=COR_VERMELHO, hover_color=COR_VERMELHO_HVR,
+                corner_radius=6, command=lambda c=cat: self._tentar_excluir_categoria(c)
+            )
+            btn_del.pack(side="left")
             habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
 
-    def _editar_categoria(self, cat: dict):
-        self._cat_selecionada = cat
-        self._cat_nome.delete(0, "end")
-        self._cat_nome.insert(0, cat["nome"])
-        self._cat_ordem.delete(0, "end")
-        self._cat_ordem.insert(0, str(cat.get("ordem", 0)))
-        self._cat_status_lbl.configure(text=f"Editando: {cat['nome']}", text_color=COR_AZUL_POINT)
-
-    def _salvar_categoria(self):
+    def _cadastrar_categoria(self):
         nome = self._cat_nome.get().strip()
         ordem_str = self._cat_ordem.get().strip()
 
@@ -625,24 +711,20 @@ class ScreenAdmin(ctk.CTkToplevel):
         except ValueError:
             ordem = 0
 
-        if self._cat_selecionada:
-            atualizar_categoria(self._cat_selecionada["id"], nome, ordem)
-            self._cat_status_lbl.configure(text=f"✅ '{nome}' atualizada com sucesso!", text_color=COR_VERDE)
-        else:
-            adicionar_categoria(nome, ordem)
-            self._cat_status_lbl.configure(text=f"✅ '{nome}' adicionada com sucesso!", text_color=COR_VERDE)
-
-        self._limpar_categoria()
+        adicionar_categoria(nome, ordem)
+        self._limpar_form_categoria()
         self._carregar_categorias_tab()
         self._atualizar_combobox_categorias()
+        if hasattr(self, "_carregar_produtos"):
+            self._carregar_produtos()
         if self._on_refresh:
             try:
                 self._on_refresh()
             except Exception:
                 pass
+        self._cat_status_lbl.configure(text=f"✅ '{nome}' cadastrada!", text_color=COR_VERDE)
 
-    def _limpar_categoria(self):
-        self._cat_selecionada = None
+    def _limpar_form_categoria(self):
         self._cat_nome.delete(0, "end")
         self._cat_ordem.delete(0, "end")
         self._cat_status_lbl.configure(text="")
@@ -740,16 +822,22 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=2)
-        header.columnconfigure(1, weight=1)
-        header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=0)
+        header.columnconfigure(0, weight=3, minsize=180)
+        header.columnconfigure(1, weight=0, minsize=110)
+        header.columnconfigure(2, weight=0, minsize=100)
+        header.columnconfigure(3, weight=0, minsize=50)
 
-        for col, txt in enumerate(["Adicional / Extra (Clique para editar)", "Acréscimo (R$)", "Ativo", "Ações"]):
-            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Adicional / Extra (clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Acréscimo (R$)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, pady=6, sticky="e")
+        ctk.CTkLabel(header, text="Ativo", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(4, 8), pady=6, sticky="e")
 
         self._adicionais_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._adicionais_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self._adicionais_scroll.columnconfigure(0, weight=3, minsize=180)
+        self._adicionais_scroll.columnconfigure(1, weight=0, minsize=110)
+        self._adicionais_scroll.columnconfigure(2, weight=0, minsize=100)
+        self._adicionais_scroll.columnconfigure(3, weight=0, minsize=50)
 
         # Form lateral adicionais (focado estritamente em novos cadastros)
         form_ad = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
@@ -804,10 +892,10 @@ class ScreenAdmin(ctk.CTkToplevel):
             bg = "#272727" if i % 2 == 0 else "#222222"
             row = ctk.CTkFrame(self._adicionais_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=2)
-            row.columnconfigure(1, weight=1)
-            row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=0)
+            row.columnconfigure(0, weight=3, minsize=180)
+            row.columnconfigure(1, weight=0, minsize=110)
+            row.columnconfigure(2, weight=0, minsize=100)
+            row.columnconfigure(3, weight=0, minsize=50)
 
             # Célula 1: Nome do adicional (editável inline)
             entry_nome = ctk.CTkEntry(
@@ -969,16 +1057,22 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=1)
-        header.columnconfigure(1, weight=2)
-        header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=0)
+        header.columnconfigure(0, weight=0, minsize=110)
+        header.columnconfigure(1, weight=3, minsize=180)
+        header.columnconfigure(2, weight=0, minsize=100)
+        header.columnconfigure(3, weight=0, minsize=50)
 
-        for col, txt in enumerate(["Valor (R$) (Clique para editar)", "Rótulo no Botão", "Ativo", "Ações"]):
-            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Valor (R$)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6, sticky="e")
+        ctk.CTkLabel(header, text="Rótulo no Botão (clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ativo", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(4, 8), pady=6, sticky="e")
 
         self._taxas_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._taxas_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self._taxas_scroll.columnconfigure(0, weight=0, minsize=110)
+        self._taxas_scroll.columnconfigure(1, weight=3, minsize=180)
+        self._taxas_scroll.columnconfigure(2, weight=0, minsize=100)
+        self._taxas_scroll.columnconfigure(3, weight=0, minsize=50)
 
         # Form lateral taxas (focado estritamente em novos cadastros)
         form_tx = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
@@ -1033,10 +1127,10 @@ class ScreenAdmin(ctk.CTkToplevel):
             bg = "#272727" if i % 2 == 0 else "#222222"
             row = ctk.CTkFrame(self._taxas_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=1)
-            row.columnconfigure(1, weight=2)
-            row.columnconfigure(2, weight=1)
-            row.columnconfigure(3, weight=0)
+            row.columnconfigure(0, weight=0, minsize=110)
+            row.columnconfigure(1, weight=3, minsize=180)
+            row.columnconfigure(2, weight=0, minsize=100)
+            row.columnconfigure(3, weight=0, minsize=50)
 
             # Célula 1: Valor Numérico (editável inline)
             entry_valor = ctk.CTkEntry(
@@ -1045,7 +1139,7 @@ class ScreenAdmin(ctk.CTkToplevel):
                 text_color=COR_VERDE, justify="right"
             )
             entry_valor.insert(0, f"{tx['valor']:.2f}".replace(".", ","))
-            entry_valor.grid(row=0, column=0, padx=6, pady=4, sticky="w")
+            entry_valor.grid(row=0, column=0, padx=6, pady=4, sticky="e")
 
             def _ao_mudar_valor(event, t=tx, w=entry_valor):
                 val_raw = w.get().replace("R$", "").replace(" ", "").replace(",", ".").strip()
@@ -1198,15 +1292,19 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=3)
-        header.columnconfigure(1, weight=1)
-        header.columnconfigure(2, weight=0)
+        header.columnconfigure(0, weight=3, minsize=220)
+        header.columnconfigure(1, weight=0, minsize=100)
+        header.columnconfigure(2, weight=0, minsize=50)
 
-        for col, txt in enumerate(["Texto da Observação (Clique para editar)", "Ativo", "Ações"]):
-            ctk.CTkLabel(header, text=txt, font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=col, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Texto da Observação (Clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ativo", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=(4, 8), pady=6, sticky="e")
 
         self._obs_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._obs_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self._obs_scroll.columnconfigure(0, weight=3, minsize=220)
+        self._obs_scroll.columnconfigure(1, weight=0, minsize=100)
+        self._obs_scroll.columnconfigure(2, weight=0, minsize=50)
 
         # Form lateral observações (focado estritamente em novos cadastros)
         form_obs = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
@@ -1257,9 +1355,9 @@ class ScreenAdmin(ctk.CTkToplevel):
             bg = "#272727" if i % 2 == 0 else "#222222"
             row = ctk.CTkFrame(self._obs_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=3)
-            row.columnconfigure(1, weight=1)
-            row.columnconfigure(2, weight=0)
+            row.columnconfigure(0, weight=3, minsize=220)
+            row.columnconfigure(1, weight=0, minsize=100)
+            row.columnconfigure(2, weight=0, minsize=50)
 
             # Célula 1: Texto da Observação (editável inline)
             entry_texto = ctk.CTkEntry(

@@ -4,7 +4,7 @@
 from datetime import datetime
 import customtkinter as ctk
 
-from database.db import calcular_balanco_mensal
+from database.db import calcular_balanco_mensal, ranking_produtos_vendidos
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_VERMELHO_HVR, COR_CINZA_BARRA,
@@ -14,13 +14,14 @@ from config import (
 
 class ScreenBalanco(ctk.CTkToplevel):
     """
-    Janela Toplevel isolada de Balanço Geral & Relatório Financeiro Mensal.
+    Janela Toplevel isolada de Balanço Geral & Relatório Financeiro Mensal/Anual.
     Apresenta:
-      - Filtro por Mês e Ano com atualização dinâmica instantânea
+      - Filtro por Período: alternância instantânea entre Por Mês e Visão Anual
       - 4 Cards de Destaque (Faturamento Total, Qtd. Pedidos, Taxas Tele, Ticket Médio)
-      - Banner de Lucro Bruto Estimado (Backend preparado para insumos)
-      - Gráfico Visual de Barras com Proporção de Meios de Pagamento (PIX, Dinheiro, Débito, Crédito)
-      - Detalhamento tabular completo discriminado por modalidade
+      - Banner de Lucro Bruto Estimado & Insumos
+      - Gráfico Visual de Barras com Proporção de Meios de Pagamento
+      - Detalhamento tabular completo discriminado por modalidade com alinhamento rigoroso
+      - Relatório completo de Vendas por Item do Cardápio (Ranking com busca e ordenação)
       - Ação de Copiar Resumo para a Área de Transferência
     """
 
@@ -33,10 +34,10 @@ class ScreenBalanco(ctk.CTkToplevel):
         sh = self.winfo_screenheight()
 
         # Otimizado para resoluções 1366x768 e Full HD
-        mw = min(1080, sw - 40)
-        mh = min(620, sh - 85)
+        mw = min(1120, sw - 40)
+        mh = min(640, sh - 80)
         self.geometry(f"{mw}x{mh}")
-        self.minsize(860, 480)
+        self.minsize(880, 500)
         self.grab_set()
         self.resizable(True, True)
 
@@ -47,18 +48,19 @@ class ScreenBalanco(ctk.CTkToplevel):
         py = max(10, (sh - mh) // 2)
         self.geometry(f"+{px}+{py}")
 
+        self._produtos_ranking_dados = []
         self._build_ui()
 
     def _build_ui(self):
         # ── 1. Topo: Título e Filtro de Período ──
-        header = ctk.CTkFrame(self, height=54, fg_color="#181818", corner_radius=0)
+        header = ctk.CTkFrame(self, height=56, fg_color="#181818", corner_radius=0)
         header.pack(fill="x")
         header.pack_propagate(False)
 
         # Título
         ctk.CTkLabel(
             header,
-            text="📊  BALANÇO GERAL / FECHAMENTO FINANCEIRO",
+            text="📊  BALANÇO GERAL / DASHBOARD",
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color=COR_PRIMARIA
         ).pack(side="left", padx=16)
@@ -67,11 +69,23 @@ class ScreenBalanco(ctk.CTkToplevel):
         filtro_box = ctk.CTkFrame(header, fg_color="transparent")
         filtro_box.pack(side="right", padx=16)
 
-        ctk.CTkLabel(
-            filtro_box, text="📅 Mês:",
+        # Seletor de Modo: Mensal vs Anual
+        self._seg_periodo = ctk.CTkSegmentedButton(
+            filtro_box, values=["📅 Por Mês", "📆 Visão Anual"],
+            command=self._on_mudar_tipo_periodo,
+            height=32, font=ctk.CTkFont(size=12, weight="bold"),
+            selected_color=COR_PRIMARIA, selected_hover_color=COR_PRIMARIA_HVR
+        )
+        self._seg_periodo.set("📅 Por Mês")
+        self._seg_periodo.pack(side="left", padx=(0, 10))
+
+        # Seletor de Mês
+        self._lbl_mes = ctk.CTkLabel(
+            filtro_box, text="Mês:",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COR_TEXTO_SUAVE
-        ).pack(side="left", padx=(0, 4))
+        )
+        self._lbl_mes.pack(side="left", padx=(0, 4))
 
         now = datetime.now()
         meses_nomes = [
@@ -91,6 +105,7 @@ class ScreenBalanco(ctk.CTkToplevel):
         )
         self._opt_mes.pack(side="left", padx=4)
 
+        # Seletor de Ano
         ctk.CTkLabel(
             filtro_box, text="Ano:",
             font=ctk.CTkFont(size=12, weight="bold"),
@@ -100,7 +115,7 @@ class ScreenBalanco(ctk.CTkToplevel):
         anos = [str(y) for y in range(now.year - 2, now.year + 4)]
         self._opt_ano = ctk.CTkOptionMenu(
             filtro_box, variable=self._ano_var,
-            values=anos, width=95, height=32,
+            values=anos, width=90, height=32,
             font=ctk.CTkFont(size=12),
             fg_color="#2D3748", button_color="#4A5568",
             command=lambda _: self._atualizar_balanco()
@@ -109,7 +124,7 @@ class ScreenBalanco(ctk.CTkToplevel):
 
         ctk.CTkButton(
             filtro_box, text="🔄 Atualizar",
-            width=100, height=32,
+            width=95, height=32,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HVR,
             corner_radius=6,
@@ -120,6 +135,14 @@ class ScreenBalanco(ctk.CTkToplevel):
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=16, pady=10)
         scroll.columnconfigure(0, weight=1)
+
+        # Subtítulo do Período Ativo
+        self._lbl_periodo_ativo = ctk.CTkLabel(
+            scroll, text="",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=COR_AZUL_POINT, anchor="w"
+        )
+        self._lbl_periodo_ativo.pack(fill="x", pady=(0, 8), padx=2)
 
         # ── 3. Cards de Métricas Principais ──
         cards_row = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -185,7 +208,7 @@ class ScreenBalanco(ctk.CTkToplevel):
         self._chart_container = ctk.CTkFrame(chart_card, fg_color="transparent")
         self._chart_container.pack(fill="x", padx=16, pady=(0, 14))
 
-        # ── 5. Detalhamento Tabular por Modalidade ──
+        # ── 5. Detalhamento Tabular por Modalidade (Alinhamento Rigoroso) ──
         table_card = ctk.CTkFrame(scroll, fg_color=COR_CINZA_BARRA, corner_radius=10)
         table_card.pack(fill="x", pady=(0, 12))
         table_card.columnconfigure(0, weight=1)
@@ -197,23 +220,70 @@ class ScreenBalanco(ctk.CTkToplevel):
             text_color=COR_TEXTO_SUAVE
         ).pack(anchor="w", padx=16, pady=(12, 8))
 
-        # Cabeçalho da tabela
+        # Cabeçalho da tabela com minsize e alinhamentos padronizados
         th = ctk.CTkFrame(table_card, fg_color="#1E1E1E", height=32, corner_radius=6)
         th.pack(fill="x", padx=12, pady=(0, 4))
-        th.columnconfigure(0, weight=2)
-        th.columnconfigure(1, weight=1)
-        th.columnconfigure(2, weight=1)
-        th.columnconfigure(3, weight=1)
+        th.columnconfigure(0, weight=2, minsize=160)
+        th.columnconfigure(1, weight=1, minsize=100)
+        th.columnconfigure(2, weight=1, minsize=130)
+        th.columnconfigure(3, weight=1, minsize=90)
 
-        ctk.CTkLabel(th, text="Forma de Pagamento", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=12, sticky="w")
+        ctk.CTkLabel(th, text="Forma de Pagamento", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=(12, 8), sticky="w")
         ctk.CTkLabel(th, text="Qtd. Pedidos", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=8, sticky="w")
         ctk.CTkLabel(th, text="Total Arrecadado (R$)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=8, sticky="e")
-        ctk.CTkLabel(th, text="Participação (%)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=12, sticky="e")
+        ctk.CTkLabel(th, text="Participação (%)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(8, 12), sticky="e")
 
         self._table_rows_frame = ctk.CTkFrame(table_card, fg_color="transparent")
         self._table_rows_frame.pack(fill="x", padx=12, pady=(0, 12))
 
-        # ── 6. Barra de Ações Inferior ──
+        # ── 6. Relatório / Ranking Completo de Vendas por Item do Cardápio ──
+        ranking_card = ctk.CTkFrame(scroll, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        ranking_card.pack(fill="x", pady=(0, 12))
+        ranking_card.columnconfigure(0, weight=1)
+
+        ranking_top = ctk.CTkFrame(ranking_card, fg_color="transparent")
+        ranking_top.pack(fill="x", padx=16, pady=(12, 8))
+
+        self._lbl_ranking_titulo = ctk.CTkLabel(
+            ranking_top,
+            text="🍔  VENDAS POR PRODUTO / RANKING DO CARDÁPIO",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=COR_PRIMARIA
+        )
+        self._lbl_ranking_titulo.pack(side="left")
+
+        # Busca rápida no ranking
+        self._ranking_busca_var = ctk.StringVar()
+        entry_busca = ctk.CTkEntry(
+            ranking_top, width=220, height=30,
+            placeholder_text="🔍 Filtrar produto...",
+            textvariable=self._ranking_busca_var,
+            font=ctk.CTkFont(size=11)
+        )
+        entry_busca.pack(side="right")
+        entry_busca.bind("<KeyRelease>", lambda _: self._filtrar_ranking_produtos())
+
+        # Cabeçalho da tabela de ranking
+        r_th = ctk.CTkFrame(ranking_card, fg_color="#1E1E1E", height=32, corner_radius=6)
+        r_th.pack(fill="x", padx=12, pady=(0, 4))
+        r_th.columnconfigure(0, weight=0, minsize=55)
+        r_th.columnconfigure(1, weight=3, minsize=200)
+        r_th.columnconfigure(2, weight=1, minsize=130)
+        r_th.columnconfigure(3, weight=1, minsize=90)
+        r_th.columnconfigure(4, weight=1, minsize=130)
+        r_th.columnconfigure(5, weight=1, minsize=90)
+
+        ctk.CTkLabel(r_th, text="Pos.", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=(12, 4), sticky="w")
+        ctk.CTkLabel(r_th, text="Produto do Cardápio", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=8, sticky="w")
+        ctk.CTkLabel(r_th, text="Categoria", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=8, sticky="w")
+        ctk.CTkLabel(r_th, text="Qtd. Vendida", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=8, sticky="center")
+        ctk.CTkLabel(r_th, text="Total Faturado (R$)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=4, padx=8, sticky="e")
+        ctk.CTkLabel(r_th, text="Part. (%)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=5, padx=(8, 12), sticky="e")
+
+        self._ranking_rows_frame = ctk.CTkFrame(ranking_card, fg_color="transparent")
+        self._ranking_rows_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+        # ── 7. Barra de Ações Inferior ──
         actions_bar = ctk.CTkFrame(self, height=48, fg_color="#181818", corner_radius=0)
         actions_bar.pack(fill="x", side="bottom")
         actions_bar.pack_propagate(False)
@@ -249,6 +319,15 @@ class ScreenBalanco(ctk.CTkToplevel):
         # Carga inicial dos dados
         self._atualizar_balanco()
 
+    def _on_mudar_tipo_periodo(self, valor):
+        if valor == "📆 Visão Anual":
+            self._opt_mes.configure(state="disabled")
+            self._lbl_mes.configure(text_color="#555555")
+        else:
+            self._opt_mes.configure(state="normal")
+            self._lbl_mes.configure(text_color=COR_TEXTO_SUAVE)
+        self._atualizar_balanco()
+
     def _atualizar_balanco(self):
         if hasattr(self, "_overlay"):
             self._overlay.show("Consolidando balanço financeiro...")
@@ -258,17 +337,30 @@ class ScreenBalanco(ctk.CTkToplevel):
 
     def _executar_atualizacao_balanco(self):
         try:
-            mes_str = self._mes_var.get()
+            is_anual = (self._seg_periodo.get() == "📆 Visão Anual")
             ano_str = self._ano_var.get()
             try:
-                mes = int(mes_str.split(" - ")[0])
                 ano = int(ano_str)
             except Exception:
-                now = datetime.now()
-                mes = now.month
-                ano = now.year
+                ano = datetime.now().year
 
-            self._dados_atuais = calcular_balanco_mensal(mes, ano)
+            if is_anual:
+                mes = None
+                periodo_rotulo = f"📅 Período: Ano Completo de {ano} (Acumulado de 12 Meses)"
+                titulo_ranking = f"🍔  VENDAS POR PRODUTO / RANKING DO CARDÁPIO ({ano} - ACUMULADO ANUAL)"
+            else:
+                mes_str = self._mes_var.get()
+                try:
+                    mes = int(mes_str.split(" - ")[0])
+                except Exception:
+                    mes = datetime.now().month
+                periodo_rotulo = f"📅 Período: {mes_str} / {ano}"
+                titulo_ranking = f"🍔  VENDAS POR PRODUTO / RANKING DO CARDÁPIO ({mes_str.split(' - ')[1]}/{ano})"
+
+            self._lbl_periodo_ativo.configure(text=periodo_rotulo)
+            self._lbl_ranking_titulo.configure(text=titulo_ranking)
+
+            self._dados_atuais = calcular_balanco_mensal(mes=mes, ano=ano)
             dados = self._dados_atuais
 
             fat = dados["faturamento_total"]
@@ -365,7 +457,7 @@ class ScreenBalanco(ctk.CTkToplevel):
                     width=75, anchor="e"
                 ).pack(side="left", padx=(4, 0))
 
-            # ── Renderizar Linhas da Tabela ──
+            # ── Renderizar Linhas da Tabela de Modalidades (Alinhamento Rigoroso) ──
             for w in self._table_rows_frame.winfo_children():
                 w.destroy()
 
@@ -380,15 +472,15 @@ class ScreenBalanco(ctk.CTkToplevel):
                 bg = "#252B37" if idx % 2 == 0 else "#1F2430"
                 row = ctk.CTkFrame(self._table_rows_frame, fg_color=bg, corner_radius=6, height=36)
                 row.pack(fill="x", pady=2)
-                row.columnconfigure(0, weight=2)
-                row.columnconfigure(1, weight=1)
-                row.columnconfigure(2, weight=1)
-                row.columnconfigure(3, weight=1)
+                row.columnconfigure(0, weight=2, minsize=160)
+                row.columnconfigure(1, weight=1, minsize=100)
+                row.columnconfigure(2, weight=1, minsize=130)
+                row.columnconfigure(3, weight=1, minsize=90)
 
                 ctk.CTkLabel(
                     row, text=f"{conf['icone']}  {k}",
                     font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
-                ).grid(row=0, column=0, padx=12, sticky="w")
+                ).grid(row=0, column=0, padx=(12, 8), sticky="w")
 
                 ctk.CTkLabel(
                     row, text=f"{item['qtd']} pedido(s)",
@@ -406,19 +498,111 @@ class ScreenBalanco(ctk.CTkToplevel):
                     row, text=f"{part:.1f} %",
                     font=ctk.CTkFont(size=12, weight="bold"),
                     text_color=conf["cor"] if part > 0 else COR_TEXTO_SUAVE
-                ).grid(row=0, column=3, padx=12, sticky="e")
+                ).grid(row=0, column=3, padx=(8, 12), sticky="e")
+
+            # ── Carregar e Renderizar Ranking de Produtos Vendidos ──
+            self._produtos_ranking_dados = ranking_produtos_vendidos(mes=mes, ano=ano)
+            self._filtrar_ranking_produtos()
+
         finally:
             if hasattr(self, "_overlay"):
                 self._overlay.hide()
 
+    def _filtrar_ranking_produtos(self):
+        """Filtra e renderiza as linhas da tabela de produtos vendidos."""
+        for w in self._ranking_rows_frame.winfo_children():
+            w.destroy()
+
+        termo = self._ranking_busca_var.get().lower().strip()
+        prods = self._produtos_ranking_dados
+        if termo:
+            prods = [p for p in prods if termo in p["produto_nome"].lower() or termo in p["categoria_nome"].lower()]
+
+        if not prods:
+            ctk.CTkLabel(
+                self._ranking_rows_frame,
+                text="Nenhum item vendido registrado no período selecionado." if not termo else f"Nenhum produto encontrado para '{termo}'.",
+                font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE
+            ).pack(pady=16)
+            return
+
+        fat_total = self._dados_atuais["faturamento_total"] if hasattr(self, "_dados_atuais") else 0.0
+
+        for idx, p in enumerate(prods):
+            bg = "#252B37" if idx % 2 == 0 else "#1F2430"
+            row = ctk.CTkFrame(self._ranking_rows_frame, fg_color=bg, corner_radius=6, height=36)
+            row.pack(fill="x", pady=2)
+            row.columnconfigure(0, weight=0, minsize=55)
+            row.columnconfigure(1, weight=3, minsize=200)
+            row.columnconfigure(2, weight=1, minsize=130)
+            row.columnconfigure(3, weight=1, minsize=90)
+            row.columnconfigure(4, weight=1, minsize=130)
+            row.columnconfigure(5, weight=1, minsize=90)
+
+            # Cor de medalha para os 3 primeiros colocados
+            pos = idx + 1
+            if pos == 1:
+                cor_pos = "#F59E0B"  # Ouro
+                pos_txt = "🥇 #1"
+            elif pos == 2:
+                cor_pos = "#94A3B8"  # Prata
+                pos_txt = "🥈 #2"
+            elif pos == 3:
+                cor_pos = "#CD7F32"  # Bronze
+                pos_txt = "🥉 #3"
+            else:
+                cor_pos = COR_TEXTO_SUAVE
+                pos_txt = f"#{pos}"
+
+            ctk.CTkLabel(
+                row, text=pos_txt,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=cor_pos
+            ).grid(row=0, column=0, padx=(12, 4), sticky="w")
+
+            ctk.CTkLabel(
+                row, text=p["produto_nome"],
+                font=ctk.CTkFont(size=12, weight="bold"),
+                anchor="w"
+            ).grid(row=0, column=1, padx=8, sticky="w")
+
+            ctk.CTkLabel(
+                row, text=p["categoria_nome"],
+                font=ctk.CTkFont(size=11),
+                text_color=COR_TEXTO_SUAVE,
+                anchor="w"
+            ).grid(row=0, column=2, padx=8, sticky="w")
+
+            ctk.CTkLabel(
+                row, text=f"{p['total_qtd']} un.",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=COR_AZUL_POINT,
+                anchor="center"
+            ).grid(row=0, column=3, padx=8, sticky="center")
+
+            val_prod_fmt = f"R$ {p['total_valor']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            ctk.CTkLabel(
+                row, text=val_prod_fmt,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=COR_VERDE
+            ).grid(row=0, column=4, padx=8, sticky="e")
+
+            part_prod = (p["total_valor"] / fat_total * 100) if fat_total > 0 else 0.0
+            ctk.CTkLabel(
+                row, text=f"{part_prod:.1f} %",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=COR_TEXTO_SUAVE
+            ).grid(row=0, column=5, padx=(8, 12), sticky="e")
+
     def _copiar_resumo(self):
-        """Copia os dados consolidados do mês atual para o clipboard."""
+        """Copia os dados consolidados do período selecionado para o clipboard."""
         if not hasattr(self, "_dados_atuais"):
             return
 
         dados = self._dados_atuais
-        mes_nome = self._mes_var.get()
+        is_anual = (self._seg_periodo.get() == "📆 Visão Anual")
         ano = self._ano_var.get()
+        periodo_desc = f"Ano Completo {ano}" if is_anual else f"{self._mes_var.get()} / {ano}"
 
         fat_fmt = f"R$ {dados['faturamento_total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         tax_fmt = f"R$ {dados['total_taxas']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -426,8 +610,8 @@ class ScreenBalanco(ctk.CTkToplevel):
         lucro_fmt = f"R$ {dados['lucro_bruto']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
         linhas = [
-            f"=== BALANÇO MENSAL - POINT LANCHES ===",
-            f"Período: {mes_nome} / {ano}",
+            f"=== BALANÇO FINANCEIRO - POINT LANCHES ===",
+            f"Período: {periodo_desc}",
             f"Faturamento Total: {fat_fmt}",
             f"Pedidos Realizados: {dados['total_pedidos']}",
             f"Taxas de Tele-Entrega: {tax_fmt}",
@@ -443,6 +627,13 @@ class ScreenBalanco(ctk.CTkToplevel):
                 val = f"R$ {item['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 part = (item["total"] / dados["faturamento_total"] * 100) if dados["faturamento_total"] > 0 else 0.0
                 linhas.append(f"• {k}: {val} ({item['qtd']} pedidos - {part:.1f}%)")
+
+        if self._produtos_ranking_dados:
+            linhas.append("")
+            linhas.append("--- TOP 5 PRODUTOS MAIS VENDIDOS ---")
+            for i, p in enumerate(self._produtos_ranking_dados[:5]):
+                v_fmt = f"R$ {p['total_valor']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                linhas.append(f"{i+1}. {p['produto_nome']} ({p['categoria_nome']}): {p['total_qtd']} un. - {v_fmt}")
 
         texto_final = "\n".join(linhas)
 
