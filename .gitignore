@@ -7,6 +7,8 @@ dist/
 *.db
 *.db-shm
 *.db-wal
+*.bak
+*.db.bak
 *.log
 publicar.log
 .github_token

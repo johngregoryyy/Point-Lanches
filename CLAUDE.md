@@ -255,10 +255,20 @@ def get_base_dir() -> str:
 - Detalhamento tabular consolidado com percentual de participação e botão para copiar o resumo financeiro para o clipboard.
 - Estrutura pronta para `Lucro Bruto = Faturamento Total - Custos de Insumos` integrada com as tabelas de insumos do SQLite.
 
-### 8.6. Backup e Portabilidade de Configurações (JSON)
-- Botões `[💾 Exportar Backup JSON]` e `[📂 Importar Backup JSON]` no cabeçalho do painel administrativo:
-  - Exporta produtos, categorias, adicionais, taxas de tele, observações rápidas e configurações gerais em arquivo JSON estruturado.
-  - Importa validando a integridade dos dados e atualizando o SQLite e a interface gráfica em tempo real (`on_refresh`).
+### 8.6. Backup, Restauração e Retrocompatibilidade Inteligente de Banco de Dados (.db / JSON)
+- Botões `[💾 Exportar Backup]` e `[📂 Importar Backup]` no cabeçalho do painel administrativo:
+  - **Exportação Consistente:** Sugere `PointLanches_Backup_YYYY-MM-DD_HHMM.db`. Realiza `PRAGMA wal_checkpoint(FULL)` e backup atômico nativo via API de backup do SQLite (ou exportação JSON estruturada caso selecionado `.json`).
+  - **Importação com Auto-Upgrade e Retrocompatibilidade Total:**
+    1. Permite importar bancos `.db` ou `.sqlite` de qualquer versão anterior (ex.: v1.0.2) sem qualquer perda de dados.
+    2. **Backup Preventivo Automático:** Gera imediatamente uma cópia de segurança `point_lanches.db.bak` do banco ativo antes de qualquer modificação.
+    3. **Substituição Segura sem Lock no Windows:** Sobrescreve as páginas do banco ativo via SQLite `backup()` API, imune a erros de arquivo travado por conexões ativas (`WinError 32`).
+    4. **Migração Dinâmica de Schema (`executar_migracoes_retrocompativeis`):**
+       - Cria tabelas ausentes (`historico_enderecos`, `ruas`, `observacoes_padrao`, `insumos`, `movimentacoes_insumos`, etc.).
+       - Inspeciona todas as colunas existentes via `PRAGMA table_info` e adiciona dinamicamente novas colunas (ex: `taxas_entrega.ordem`, `itens_pedido.categoria`, `ruas.taxa`, etc.) com `ALTER TABLE ADD COLUMN`.
+       - Backfill inteligente: popula `historico_enderecos` a partir dos pedidos históricos se estiver vazia.
+       - Popula sementes padrão de `ruas` e `observacoes_padrao` se vazias.
+    5. **Rollback Automático:** Caso ocorra erro de integridade ou falha no arquivo importado, o sistema restaura o arquivo `.bak` preventivo automaticamente.
+    6. Atualiza todas as abas e a interface gráfica do sistema em tempo real (`on_refresh`).
 
 ### 8.7. Alterar ou Testar Impressão Térmica
 - Acesse a aba **Configurações (Admin) -> Impressora**.

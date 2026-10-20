@@ -103,122 +103,215 @@ def get_connection():
     return conn
 
 
-def init_db():
-    """Cria/migra tabelas."""
-    with get_connection() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS categorias (
-                id   INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome TEXT NOT NULL UNIQUE
-            );
+# ── Schema Padrão e Retrocompatibilidade ──────────────────────────────────────
 
-            CREATE TABLE IF NOT EXISTS produtos (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                categoria_id INTEGER NOT NULL REFERENCES categorias(id),
-                nome         TEXT NOT NULL,
-                descricao    TEXT DEFAULT '',
-                preco        REAL NOT NULL,
-                ativo        INTEGER DEFAULT 1
-            );
+SCHEMA_TABELAS_PADRAO = {
+    "categorias": """
+        CREATE TABLE IF NOT EXISTS categorias (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome  TEXT NOT NULL UNIQUE,
+            ordem INTEGER DEFAULT 0
+        )
+    """,
+    "produtos": """
+        CREATE TABLE IF NOT EXISTS produtos (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            categoria_id INTEGER NOT NULL REFERENCES categorias(id),
+            nome         TEXT NOT NULL,
+            descricao    TEXT DEFAULT '',
+            preco        REAL NOT NULL,
+            ativo        INTEGER DEFAULT 1
+        )
+    """,
+    "adicionais": """
+        CREATE TABLE IF NOT EXISTS adicionais (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome  TEXT NOT NULL,
+            preco REAL NOT NULL,
+            ativo INTEGER DEFAULT 1
+        )
+    """,
+    "taxas_entrega": """
+        CREATE TABLE IF NOT EXISTS taxas_entrega (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            valor REAL NOT NULL,
+            label TEXT NOT NULL,
+            ativo INTEGER DEFAULT 1,
+            ordem INTEGER DEFAULT 0
+        )
+    """,
+    "pedidos": """
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero          INTEGER NOT NULL,
+            cliente_nome    TEXT DEFAULT '',
+            cliente_fone    TEXT DEFAULT '',
+            endereco_rua    TEXT DEFAULT '',
+            endereco_num    TEXT DEFAULT '',
+            endereco_comp   TEXT DEFAULT '',
+            endereco_bairro TEXT DEFAULT '',
+            endereco_ref    TEXT DEFAULT '',
+            subtotal        REAL DEFAULT 0,
+            taxa_entrega    REAL DEFAULT 0,
+            total           REAL DEFAULT 0,
+            forma_pgto      TEXT DEFAULT '',
+            valor_pago      REAL DEFAULT 0,
+            troco           REAL DEFAULT 0,
+            status          TEXT DEFAULT 'fechado',
+            criado_em       TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """,
+    "itens_pedido": """
+        CREATE TABLE IF NOT EXISTS itens_pedido (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            pedido_id  INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+            produto_id INTEGER REFERENCES produtos(id),
+            nome       TEXT NOT NULL,
+            preco_unit REAL NOT NULL,
+            quantidade INTEGER NOT NULL DEFAULT 1,
+            observacao TEXT DEFAULT '',
+            categoria  TEXT DEFAULT ''
+        )
+    """,
+    "configuracoes": """
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        )
+    """,
+    "observacoes_padrao": """
+        CREATE TABLE IF NOT EXISTS observacoes_padrao (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            texto TEXT NOT NULL,
+            ativo INTEGER DEFAULT 1
+        )
+    """,
+    "ruas": """
+        CREATE TABLE IF NOT EXISTS ruas (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome   TEXT NOT NULL UNIQUE,
+            bairro TEXT DEFAULT '',
+            taxa   REAL DEFAULT 0.0,
+            ativo  INTEGER DEFAULT 1
+        )
+    """,
+    "insumos": """
+        CREATE TABLE IF NOT EXISTS insumos (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome           TEXT NOT NULL,
+            unidade_medida TEXT NOT NULL,
+            custo_unitario REAL NOT NULL DEFAULT 0.0,
+            estoque_atual  REAL NOT NULL DEFAULT 0.0,
+            ativo          INTEGER DEFAULT 1
+        )
+    """,
+    "movimentacoes_insumos": """
+        CREATE TABLE IF NOT EXISTS movimentacoes_insumos (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            insumo_id   INTEGER NOT NULL REFERENCES insumos(id),
+            tipo        TEXT NOT NULL,
+            quantidade  REAL NOT NULL,
+            valor_total REAL NOT NULL,
+            data        TEXT NOT NULL
+        )
+    """,
+    "historico_enderecos": """
+        CREATE TABLE IF NOT EXISTS historico_enderecos (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            rua           TEXT NOT NULL COLLATE NOCASE,
+            numero        TEXT NOT NULL COLLATE NOCASE,
+            bairro        TEXT DEFAULT '',
+            taxa_frete    REAL NOT NULL DEFAULT 0.0,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(rua, numero)
+        )
+    """
+}
 
-            CREATE TABLE IF NOT EXISTS adicionais (
-                id    INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome  TEXT NOT NULL,
-                preco REAL NOT NULL,
-                ativo INTEGER DEFAULT 1
-            );
+COLUNAS_TABELAS_PADRAO = {
+    "categorias": {
+        "ordem": "INTEGER DEFAULT 0",
+    },
+    "taxas_entrega": {
+        "ordem": "INTEGER DEFAULT 0",
+        "ativo": "INTEGER DEFAULT 1",
+    },
+    "itens_pedido": {
+        "categoria": "TEXT DEFAULT ''",
+        "observacao": "TEXT DEFAULT ''",
+    },
+    "pedidos": {
+        "endereco_bairro": "TEXT DEFAULT ''",
+        "endereco_ref": "TEXT DEFAULT ''",
+        "endereco_comp": "TEXT DEFAULT ''",
+        "valor_pago": "REAL DEFAULT 0",
+        "troco": "REAL DEFAULT 0",
+        "status": "TEXT DEFAULT 'fechado'",
+        "criado_em": "TEXT DEFAULT (datetime('now','localtime'))",
+    },
+    "ruas": {
+        "bairro": "TEXT DEFAULT ''",
+        "taxa": "REAL DEFAULT 0.0",
+        "ativo": "INTEGER DEFAULT 1",
+    },
+    "produtos": {
+        "descricao": "TEXT DEFAULT ''",
+        "ativo": "INTEGER DEFAULT 1",
+    },
+    "adicionais": {
+        "ativo": "INTEGER DEFAULT 1",
+    },
+    "observacoes_padrao": {
+        "ativo": "INTEGER DEFAULT 1",
+    },
+    "insumos": {
+        "ativo": "INTEGER DEFAULT 1",
+    },
+    "historico_enderecos": {
+        "bairro": "TEXT DEFAULT ''",
+        "taxa_frete": "REAL DEFAULT 0.0",
+        "atualizado_em": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    }
+}
 
-            CREATE TABLE IF NOT EXISTS taxas_entrega (
-                id    INTEGER PRIMARY KEY AUTOINCREMENT,
-                valor REAL NOT NULL,
-                label TEXT NOT NULL,
-                ativo INTEGER DEFAULT 1,
-                ordem INTEGER DEFAULT 0
-            );
 
-            CREATE TABLE IF NOT EXISTS pedidos (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                numero          INTEGER NOT NULL,
-                cliente_nome    TEXT DEFAULT '',
-                cliente_fone    TEXT DEFAULT '',
-                endereco_rua    TEXT DEFAULT '',
-                endereco_num    TEXT DEFAULT '',
-                endereco_comp   TEXT DEFAULT '',
-                endereco_bairro TEXT DEFAULT '',
-                endereco_ref    TEXT DEFAULT '',
-                subtotal        REAL DEFAULT 0,
-                taxa_entrega    REAL DEFAULT 0,
-                total           REAL DEFAULT 0,
-                forma_pgto      TEXT DEFAULT '',
-                valor_pago      REAL DEFAULT 0,
-                troco           REAL DEFAULT 0,
-                status          TEXT DEFAULT 'aberto',
-                criado_em       TEXT DEFAULT (datetime('now','localtime'))
-            );
+def executar_migracoes_retrocompativeis(db_path: str = None) -> int:
+    """
+    Inspeciona o schema do banco SQLite informado (ou banco ativo) e aplica
+    todas as migrações necessárias para a versão atual:
+    - Cria tabelas novas ausentes em versões legadas (v1.0.2 em diante).
+    - Inspeciona PRAGMA table_info e adiciona colunas faltantes via ALTER TABLE.
+    - Popula tabelas essenciais (ruas, observações, histórico) caso vazias.
+    - Preserva integralmente todos os registros existentes de pedidos, clientes e produtos.
+    """
+    alvo = db_path or get_db_path()
+    conn = sqlite3.connect(alvo)
+    conn.row_factory = sqlite3.Row
+    migracoes_aplicadas = 0
 
-            CREATE TABLE IF NOT EXISTS itens_pedido (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                pedido_id  INTEGER NOT NULL REFERENCES pedidos(id),
-                produto_id INTEGER REFERENCES produtos(id),
-                nome       TEXT NOT NULL,
-                preco_unit REAL NOT NULL,
-                quantidade INTEGER NOT NULL DEFAULT 1,
-                observacao TEXT DEFAULT '',
-                categoria  TEXT DEFAULT ''
-            );
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=OFF")
 
-            CREATE TABLE IF NOT EXISTS configuracoes (
-                chave TEXT PRIMARY KEY,
-                valor TEXT NOT NULL
-            );
+        # 1. Criação de tabelas novas ausentes
+        for nome_tab, ddl in SCHEMA_TABELAS_PADRAO.items():
+            conn.execute(ddl)
 
-            CREATE TABLE IF NOT EXISTS observacoes_padrao (
-                id    INTEGER PRIMARY KEY AUTOINCREMENT,
-                texto TEXT NOT NULL,
-                ativo INTEGER DEFAULT 1
-            );
+        # 2. Inspecionar e adicionar colunas faltantes
+        for nome_tab, cols in COLUNAS_TABELAS_PADRAO.items():
+            try:
+                existentes = {r["name"].lower() for r in conn.execute(f"PRAGMA table_info({nome_tab})").fetchall()}
+                for col_nome, col_def in cols.items():
+                    if col_nome.lower() not in existentes:
+                        conn.execute(f"ALTER TABLE {nome_tab} ADD COLUMN {col_nome} {col_def}")
+                        migracoes_aplicadas += 1
+            except Exception:
+                pass
 
-            CREATE TABLE IF NOT EXISTS ruas (
-                id     INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome   TEXT NOT NULL UNIQUE,
-                bairro TEXT DEFAULT '',
-                taxa   REAL DEFAULT 0.0,
-                ativo  INTEGER DEFAULT 1
-            );
-
-            CREATE TABLE IF NOT EXISTS insumos (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome           TEXT NOT NULL,
-                unidade_medida TEXT NOT NULL,
-                custo_unitario REAL NOT NULL DEFAULT 0.0,
-                estoque_atual  REAL NOT NULL DEFAULT 0.0,
-                ativo          INTEGER DEFAULT 1
-            );
-
-            CREATE TABLE IF NOT EXISTS movimentacoes_insumos (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                insumo_id   INTEGER NOT NULL REFERENCES insumos(id),
-                tipo        TEXT NOT NULL,
-                quantidade  REAL NOT NULL,
-                valor_total REAL NOT NULL,
-                data        TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS historico_enderecos (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                rua           TEXT NOT NULL COLLATE NOCASE,
-                numero        TEXT NOT NULL COLLATE NOCASE,
-                bairro        TEXT DEFAULT '',
-                taxa_frete    REAL NOT NULL DEFAULT 0.0,
-                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(rua, numero)
-            );
-        """)
-
-        # Migração: popular historico_enderecos a partir de pedidos anteriores se vazia
+        # 3. Backfill inteligente do histórico de endereços se tabela vazia
         try:
-            count = conn.execute("SELECT COUNT(*) FROM historico_enderecos").fetchone()[0]
-            if count == 0:
+            cnt_hist = conn.execute("SELECT COUNT(*) FROM historico_enderecos").fetchone()[0]
+            if cnt_hist == 0:
                 conn.execute("""
                     INSERT OR IGNORE INTO historico_enderecos (rua, numero, bairro, taxa_frete, atualizado_em)
                     SELECT endereco_rua, endereco_num, endereco_bairro, taxa_entrega, criado_em
@@ -229,17 +322,154 @@ def init_db():
         except Exception:
             pass
 
-        # Migrações seguras (ignoram erro se coluna já existe)
-        for sql in [
-            "ALTER TABLE itens_pedido ADD COLUMN categoria TEXT DEFAULT ''",
-            "ALTER TABLE categorias ADD COLUMN ordem INTEGER DEFAULT 0",
-            "ALTER TABLE ruas ADD COLUMN bairro TEXT DEFAULT ''",
-            "ALTER TABLE ruas ADD COLUMN taxa REAL DEFAULT 0.0",
-        ]:
+        # 4. População de ruas padrão caso tabela vazia
+        try:
+            cnt_ruas = conn.execute("SELECT COUNT(*) FROM ruas").fetchone()[0]
+            if cnt_ruas == 0:
+                from config import RUAS_DOIS_IRMAOS
+                for r in RUAS_DOIS_IRMAOS:
+                    conn.execute("INSERT OR IGNORE INTO ruas (nome, ativo) VALUES (?, 1)", (r,))
+        except Exception:
+            pass
+
+        # 5. População de observações padrão caso tabela vazia
+        try:
+            cnt_obs = conn.execute("SELECT COUNT(*) FROM observacoes_padrao").fetchone()[0]
+            if cnt_obs == 0:
+                from database.seed import OBS_PADRAO
+                for texto in OBS_PADRAO:
+                    conn.execute("INSERT INTO observacoes_padrao (texto, ativo) VALUES (?, 1)", (texto,))
+        except Exception:
+            pass
+
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+    return migracoes_aplicadas
+
+
+def init_db():
+    """Cria/migra tabelas com auto-upgrade retrocompatível."""
+    executar_migracoes_retrocompativeis(get_db_path())
+
+
+def exportar_banco_sqlite(caminho_destino: str) -> str:
+    """
+    Exporta uma cópia consistente do banco SQLite ativo.
+    Garante checkpoint WAL prévio e cópia segura via SQLite backup API.
+    """
+    if not caminho_destino:
+        raise ValueError("Caminho de destino não especificado.")
+
+    os.makedirs(os.path.dirname(os.path.abspath(caminho_destino)), exist_ok=True)
+
+    with get_connection() as conn:
+        try:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+        except Exception:
+            pass
+
+        dest_conn = sqlite3.connect(caminho_destino)
+        try:
+            conn.backup(dest_conn)
+            dest_conn.commit()
+        finally:
+            dest_conn.close()
+
+    if not os.path.exists(caminho_destino) or os.path.getsize(caminho_destino) == 0:
+        raise RuntimeError("Arquivo de backup gerado está vazio ou não foi criado.")
+
+    return caminho_destino
+
+
+def importar_banco_sqlite(caminho_origem: str) -> tuple[bool, str]:
+    """
+    Importa e migra retrocompativelmente um banco de dados SQLite (.db ou .sqlite).
+    1. Valida integridade prévia do arquivo selecionado.
+    2. Cria cópia de segurança point_lanches.db.bak do banco ativo.
+    3. Substitui o conteúdo do banco ativo pelo banco importado via backup API.
+    4. Executa migrações retrocompatíveis adaptando o schema antigo para o atual.
+    5. Em caso de falha, restaura automaticamente o backup preventivo .bak.
+    """
+    if not os.path.exists(caminho_origem):
+        return False, f"Arquivo não encontrado: {caminho_origem}"
+
+    # 1. Validação de integridade do arquivo importado
+    try:
+        test_conn = sqlite3.connect(caminho_origem)
+        test_conn.row_factory = sqlite3.Row
+        check = test_conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if check != "ok":
+            test_conn.close()
+            return False, f"O arquivo selecionado está corrompido: PRAGMA integrity_check retornou '{check}'."
+
+        tabelas = [r[0] for r in test_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        test_conn.close()
+
+        tabelas_esperadas = {"pedidos", "produtos", "categorias", "configuracoes"}
+        if not any(t in tabelas for t in tabelas_esperadas):
+            return False, "O arquivo selecionado não é um banco de dados reconhecido do Point Lanches."
+    except Exception as e:
+        return False, f"Arquivo inválido ou ilegível: {str(e)}"
+
+    db_path = get_db_path()
+    bak_path = db_path + ".bak"
+
+    # 2. Cópia preventiva de segurança (.bak) do banco ativo
+    try:
+        with get_connection() as active_conn:
             try:
-                conn.execute(sql)
+                active_conn.execute("PRAGMA wal_checkpoint(FULL)")
             except Exception:
                 pass
+            bak_conn = sqlite3.connect(bak_path)
+            try:
+                active_conn.backup(bak_conn)
+                bak_conn.commit()
+            finally:
+                bak_conn.close()
+    except Exception as e:
+        try:
+            if os.path.exists(db_path):
+                import shutil
+                shutil.copy2(db_path, bak_path)
+        except Exception:
+            pass
+
+    # 3. Aplicar conteúdo do banco importado sobre o banco ativo
+    try:
+        src_conn = sqlite3.connect(caminho_origem)
+        with get_connection() as active_conn:
+            src_conn.backup(active_conn)
+            active_conn.commit()
+        src_conn.close()
+
+        # 4. Executar migrações retrocompatíveis automáticas (auto-upgrade)
+        executar_migracoes_retrocompativeis(db_path)
+
+        # 5. Notificar ouvintes e caches em memória
+        _notificar_ruas_modificadas()
+
+        return True, "Backup importado com sucesso! A estrutura do banco foi atualizada para a versão atual mantendo todos os seus registros anteriores."
+    except Exception as e:
+        # Reversão / Restauração automática do backup preventivo .bak
+        try:
+            if os.path.exists(bak_path):
+                bak_conn = sqlite3.connect(bak_path)
+                with get_connection() as active_conn:
+                    bak_conn.backup(active_conn)
+                    active_conn.commit()
+                bak_conn.close()
+        except Exception:
+            pass
+
+        return False, f"Falha ao importar banco: arquivo inválido ou bloqueado por outro processo. Detalhes: {str(e)}"
 
 
 # ── Produtos e Categorias ─────────────────────────────────────────────────────

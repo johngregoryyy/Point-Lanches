@@ -12,7 +12,8 @@ from database.db import (
     get_config, set_config,
     listar_observacoes_padrao, adicionar_observacao_padrao,
     atualizar_observacao_padrao, remover_observacao_padrao,
-    exportar_dados_json, importar_dados_json, get_categoria_por_nome
+    exportar_dados_json, importar_dados_json, get_categoria_por_nome,
+    exportar_banco_sqlite, importar_banco_sqlite
 )
 from printer.escpos_printer import (
     test_connection_network, test_connection_usb,
@@ -129,7 +130,7 @@ class ScreenAdmin(ctk.CTkToplevel):
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#334155", hover_color="#475569",
             corner_radius=6,
-            command=self._importar_backup_json
+            command=self._importar_backup
         )
         btn_importar.pack(side="right", padx=4)
         habilitar_feedback_clique(btn_importar, cor_flash="#475569")
@@ -141,7 +142,7 @@ class ScreenAdmin(ctk.CTkToplevel):
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HVR,
             corner_radius=6,
-            command=self._exportar_backup_json
+            command=self._exportar_backup
         )
         btn_exportar.pack(side="right", padx=4)
         habilitar_feedback_clique(btn_exportar, cor_flash=COR_VERDE)
@@ -1726,21 +1727,26 @@ class ScreenAdmin(ctk.CTkToplevel):
         if hasattr(self, "_usb_var"):
             self._usb_var.set(get_config("printer_usb", PRINTER_USB_DEFAULT))
 
-    # ── BACKUP & PORTABILIDADE (EXPORTAR / IMPORTAR JSON) ─────────────────────
+    # ── BACKUP & PORTABILIDADE (EXPORTAR / IMPORTAR BANCO / JSON) ─────────────
 
-    def _exportar_backup_json(self):
+    def _exportar_backup(self):
         from tkinter import filedialog
         from datetime import datetime
 
-        data_s = datetime.now().strftime("%Y%m%d_%H%M%S")
-        sugestao_nome = f"point_lanches_backup_{data_s}.json"
+        data_s = datetime.now().strftime("%Y-%m-%d_%H%M")
+        sugestao_nome = f"PointLanches_Backup_{data_s}.db"
 
         caminho = filedialog.asksaveasfilename(
             parent=self,
-            title="Salvar Backup de Configurações",
+            title="Salvar Backup de Dados",
             initialfile=sugestao_nome,
-            defaultextension=".json",
-            filetypes=[("Arquivo JSON", "*.json"), ("Todos os Arquivos", "*.*")]
+            defaultextension=".db",
+            filetypes=[
+                ("Banco SQLite (*.db)", "*.db"),
+                ("Banco SQLite (*.sqlite)", "*.sqlite"),
+                ("Backup JSON legado (*.json)", "*.json"),
+                ("Todos os Arquivos", "*.*")
+            ]
         )
         if not caminho:
             return
@@ -1748,40 +1754,58 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._overlay.show("Exportando dados de backup...")
         self.after(60, lambda: self._executar_exportacao_backup(caminho))
 
+    # Compatibilidade retroativa interna
+    _exportar_backup_json = _exportar_backup
+
     def _executar_exportacao_backup(self, caminho):
-        import json
         try:
-            dados = exportar_dados_json()
-            with open(caminho, "w", encoding="utf-8") as f:
-                json.dump(dados, f, ensure_ascii=False, indent=2)
+            if caminho.lower().endswith(".json"):
+                import json
+                dados = exportar_dados_json()
+                with open(caminho, "w", encoding="utf-8") as f:
+                    json.dump(dados, f, ensure_ascii=False, indent=2)
+            else:
+                exportar_banco_sqlite(caminho)
 
             self._overlay.hide()
-            self._mostrar_alerta("Backup Exportado!", f"Configurações exportadas com sucesso para:\n{caminho}", icone="✅")
+            self._mostrar_alerta("Backup Exportado!", f"Banco de dados exportado com sucesso para:\n{caminho}", icone="✅")
         except Exception as e:
             self._overlay.hide()
             self._mostrar_alerta("Erro na Exportação", f"Não foi possível salvar o arquivo de backup:\n{str(e)}", icone="❌")
 
-    def _importar_backup_json(self):
+    def _importar_backup(self):
         from tkinter import filedialog
 
         caminho = filedialog.askopenfilename(
             parent=self,
             title="Selecionar Arquivo de Backup para Importação",
-            filetypes=[("Arquivo JSON", "*.json"), ("Todos os Arquivos", "*.*")]
+            filetypes=[
+                ("Banco SQLite (*.db;*.sqlite)", "*.db;*.sqlite"),
+                ("Banco SQLite (*.db)", "*.db"),
+                ("Banco SQLite (*.sqlite)", "*.sqlite"),
+                ("Backup JSON (*.json)", "*.json"),
+                ("Todos os Arquivos", "*.*")
+            ]
         )
         if not caminho:
             return
 
-        self._overlay.show("Processando importação de configurações...")
+        self._overlay.show("Processando importação e atualização do banco...")
         self.after(60, lambda: self._executar_importacao_backup(caminho))
 
-    def _executar_importacao_backup(self, caminho):
-        import json
-        try:
-            with open(caminho, "r", encoding="utf-8") as f:
-                dados = json.load(f)
+    # Compatibilidade retroativa interna
+    _importar_backup_json = _importar_backup
 
-            sucesso, msg = importar_dados_json(dados)
+    def _executar_importacao_backup(self, caminho):
+        try:
+            if caminho.lower().endswith(".json"):
+                import json
+                with open(caminho, "r", encoding="utf-8") as f:
+                    dados = json.load(f)
+                sucesso, msg = importar_dados_json(dados)
+            else:
+                sucesso, msg = importar_banco_sqlite(caminho)
+
             self._overlay.hide()
             if sucesso:
                 # Recarregar abas do Admin em tempo real
@@ -1804,12 +1828,24 @@ class ScreenAdmin(ctk.CTkToplevel):
                     except Exception:
                         pass
 
-                self._mostrar_alerta("Importação Concluída!", "Configurações importadas e aplicadas ao sistema em tempo real!", icone="✅")
+                msg_sucesso = (
+                    f"Backup importado com sucesso! A estrutura do banco foi atualizada para a "
+                    f"versão atual (v{__version__}) mantendo todos os seus registros anteriores."
+                )
+                self._mostrar_alerta("Importação Concluída!", msg_sucesso, icone="✅")
             else:
-                self._mostrar_alerta("Falha na Validação", msg, icone="⚠️")
+                msg_erro = (
+                    f"Falha ao importar banco: arquivo inválido ou bloqueado por outro processo.\n"
+                    f"Detalhes: {msg}"
+                )
+                self._mostrar_alerta("Falha na Importação", msg_erro, icone="⚠️")
         except Exception as e:
             self._overlay.hide()
-            self._mostrar_alerta("Arquivo Inválido", f"Erro ao processar o arquivo JSON:\n{str(e)}", icone="❌")
+            msg_erro = (
+                f"Falha ao importar banco: arquivo inválido ou bloqueado por outro processo.\n"
+                f"Detalhes: {str(e)}"
+            )
+            self._mostrar_alerta("Falha ao Importar", msg_erro, icone="❌")
 
     def _mostrar_alerta(self, titulo: str, mensagem: str, icone: str = "ℹ️"):
         win = ctk.CTkToplevel(self)
