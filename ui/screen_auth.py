@@ -195,6 +195,13 @@ class ScreenAuth(ctk.CTkToplevel):
 
         def _worker():
             sucesso, msg = auth_manager.login(email, senha, remember=self._lembrar_var.get())
+            if sucesso:
+                self.after(0, lambda: self._status_lbl.configure(text="Sincronizando cardápio da nuvem...", text_color=COR_AZUL_POINT))
+                try:
+                    from services.supabase_sync import puxar_dados_do_supabase
+                    puxar_dados_do_supabase()
+                except Exception:
+                    pass
             self.after(0, lambda: self._pos_login(sucesso, msg))
 
         t = threading.Thread(target=_worker, daemon=True)

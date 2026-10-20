@@ -1,4 +1,4 @@
-# services/supabase_sync.py - Sincronização em segundo plano SQLite <-> Supabase
+# services/supabase_sync.py - Sincronização Bidirecional SQLite <-> Supabase
 # =============================================================================
 
 import json
@@ -6,7 +6,7 @@ import ssl
 import threading
 import urllib.request
 import urllib.error
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from services.supabase_auth import auth_manager, _get_credentials
 
@@ -21,9 +21,110 @@ def _fazer_requisicao(endpoint: str, metodo: str = "GET", dados: Any = None) -> 
     body = json.dumps(dados).encode("utf-8") if dados is not None else None
     req = urllib.request.Request(full_url, data=body, headers=headers, method=metodo)
 
-    with urllib.request.urlopen(req, context=ctx, timeout=6) as resp:
+    with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
         content = resp.read().decode("utf-8")
         return json.loads(content) if content else None
+
+
+def puxar_dados_do_supabase() -> bool:
+    """
+    Puxa do Supabase todas as tabelas mestras (categorias, produtos, adicionais,
+    taxas de tele, observações rápidas, ruas, configurações) e atualiza o banco local SQLite.
+    Garante que o PDV reflita fielmente os dados do Supabase.
+    """
+    try:
+        from database.db import get_connection, _notificar_ruas_modificadas
+
+        # 1. Puxar dados da nuvem
+        cat_data = _fazer_requisicao("categorias?select=*&order=ordem.asc,id.asc")
+        prod_data = _fazer_requisicao("produtos?select=*&order=id.asc")
+        adic_data = _fazer_requisicao("adicionais?select=*&order=id.asc")
+        taxas_data = _fazer_requisicao("taxas_entrega?select=*&order=ordem.asc,id.asc")
+        obs_data = _fazer_requisicao("observacoes_padrao?select=*&order=id.asc")
+        ruas_data = _fazer_requisicao("ruas?select=*&order=nome.asc")
+        cfg_data = _fazer_requisicao("configuracoes?select=*")
+
+        with get_connection() as conn:
+            conn.execute("PRAGMA foreign_keys = OFF;")
+
+            if cat_data is not None and len(cat_data) > 0:
+                conn.execute("DELETE FROM categorias;")
+                for c in cat_data:
+                    conn.execute(
+                        "INSERT INTO categorias (id, nome, ordem) VALUES (?, ?, ?);",
+                        (c["id"], c["nome"], c.get("ordem", 0))
+                    )
+
+            if prod_data is not None and len(prod_data) > 0:
+                conn.execute("DELETE FROM produtos;")
+                for p in prod_data:
+                    conn.execute(
+                        "INSERT INTO produtos (id, categoria_id, nome, descricao, preco, ativo) VALUES (?, ?, ?, ?, ?, ?);",
+                        (p["id"], p["categoria_id"], p["nome"], p.get("descricao", ""), float(p["preco"]), p.get("ativo", 1))
+                    )
+
+            if adic_data is not None and len(adic_data) > 0:
+                conn.execute("DELETE FROM adicionais;")
+                for a in adic_data:
+                    conn.execute(
+                        "INSERT INTO adicionais (id, nome, preco, ativo) VALUES (?, ?, ?, ?);",
+                        (a["id"], a["nome"], float(a["preco"]), a.get("ativo", 1))
+                    )
+
+            if taxas_data is not None and len(taxas_data) > 0:
+                conn.execute("DELETE FROM taxas_entrega;")
+                for t in taxas_data:
+                    conn.execute(
+                        "INSERT INTO taxas_entrega (id, valor, label, ativo, ordem) VALUES (?, ?, ?, ?, ?);",
+                        (t["id"], float(t["valor"]), t["label"], t.get("ativo", 1), t.get("ordem", 0))
+                    )
+
+            if obs_data is not None and len(obs_data) > 0:
+                conn.execute("DELETE FROM observacoes_padrao;")
+                for o in obs_data:
+                    conn.execute(
+                        "INSERT INTO observacoes_padrao (id, texto, ativo) VALUES (?, ?, ?);",
+                        (o["id"], o["texto"], o.get("ativo", 1))
+                    )
+
+            if ruas_data is not None and len(ruas_data) > 0:
+                conn.execute("DELETE FROM ruas;")
+                for r in ruas_data:
+                    conn.execute(
+                        "INSERT INTO ruas (id, nome, ativo, bairro, taxa) VALUES (?, ?, ?, ?, ?);",
+                        (r["id"], r["nome"], r.get("ativo", 1), r.get("bairro", ""), float(r.get("taxa", 0.0) or 0.0))
+                    )
+
+            if cfg_data is not None and len(cfg_data) > 0:
+                for cfg in cfg_data:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?);",
+                        (cfg["chave"], cfg["valor"])
+                    )
+
+            conn.execute("PRAGMA foreign_keys = ON;")
+
+        _notificar_ruas_modificadas()
+        return True
+    except Exception as e:
+        print(f"Aviso: Não foi possível sincronizar catálogo do Supabase: {e}")
+        return False
+
+
+def sincronizar_item_supabase_async(tabela: str, dados: Any, metodo: str = "POST", query_params: str = ""):
+    """Envia alteração em segundo plano para o Supabase se autenticado."""
+    if not auth_manager.is_authenticated():
+        return
+
+    def _worker():
+        try:
+            endpoint = f"{tabela}{'?' + query_params if query_params else ''}"
+            _fazer_requisicao(endpoint, metodo=metodo, dados=dados)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
 
 
 def enviar_pedido_supabase_async(pedido: Dict[str, Any], itens: List[Dict[str, Any]]):

@@ -190,6 +190,17 @@ class App(ctk.CTk):
 
     def _on_login_sucesso(self):
         """Callback acionado após login bem-sucedido."""
+        try:
+            from services.supabase_sync import puxar_dados_do_supabase
+            puxar_dados_do_supabase()
+        except Exception:
+            pass
+
+        # Garante que todas as TopBars ocultem o botão de login imediatamente
+        for tela in getattr(self, "_telas", {}).values():
+            if hasattr(tela, "_topbar") and hasattr(tela._topbar, "atualizar_status_auth"):
+                tela._topbar.atualizar_status_auth(True)
+
         if hasattr(self, "_telas") and "cart" in self._telas:
             self._telas["cart"].recarregar()
 
@@ -254,13 +265,23 @@ def main():
     def _iniciar_fluxo_autenticacao():
         splash.close()
         if auth_manager.is_authenticated():
-            # Já autenticado com sessão salva: abre direto
+            # Já autenticado com sessão salva: atualiza os dados da nuvem e abre direto
+            try:
+                from services.supabase_sync import puxar_dados_do_supabase
+                puxar_dados_do_supabase()
+            except Exception:
+                pass
             app.mostrar_janela_principal()
+            app._on_login_sucesso()
         else:
             # Não autenticado: exibe tela de login antes de abrir a tela principal
+            def _ao_sucesso():
+                app.mostrar_janela_principal()
+                app._on_login_sucesso()
+
             auth_modal = ScreenAuth(
                 app,
-                on_success=lambda: app.mostrar_janela_principal(),
+                on_success=_ao_sucesso,
                 on_offline=lambda: app.mostrar_janela_principal()
             )
             auth_modal.focus()

@@ -408,18 +408,28 @@ class TopBar(ctk.CTkFrame):
 
     def atualizar_status_auth(self, logado: bool = None):
         """Atualiza a visibilidade do botão de login: caso esteja logado, o ícone SOME."""
-        if logado is None:
-            try:
-                from services.supabase_auth import auth_manager
-                logado = auth_manager.is_authenticated()
-            except Exception:
-                logado = False
+        def _apply():
+            nonlocal logado
+            if logado is None:
+                try:
+                    from services.supabase_auth import auth_manager
+                    logado = auth_manager.is_authenticated()
+                except Exception:
+                    logado = False
 
-        if logado:
-            # Caso esteja logado, o ícone SOME
-            if self._btn_cloud_login.winfo_ismapped():
-                self._btn_cloud_login.pack_forget()
-        else:
-            # Caso esteja offline, exibe o ícone de login junto aos outros botões
-            if not self._btn_cloud_login.winfo_ismapped() and self._on_login:
-                self._btn_cloud_login.pack(side="right", padx=5)
+            if not hasattr(self, "_btn_cloud_login"):
+                return
+
+            if logado:
+                # Caso esteja logado, o ícone SOME imediatamente
+                if self._btn_cloud_login.winfo_ismapped():
+                    self._btn_cloud_login.pack_forget()
+            else:
+                # Caso esteja offline, exibe o ícone de login junto aos outros botões
+                if not self._btn_cloud_login.winfo_ismapped() and self._on_login:
+                    self._btn_cloud_login.pack(side="right", padx=5)
+
+        try:
+            self.after(0, _apply)
+        except Exception:
+            _apply()

@@ -1,6 +1,6 @@
 # version.py - Versão centralizada do Point Lanches
 # =============================================================================
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 __app_name__ = "Point Lanches"
 __author__   = "Point Lanches Team"

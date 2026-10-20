@@ -81,6 +81,13 @@ class ScreenAdmin(ctk.CTkToplevel):
             except Exception:
                 pass
 
+        # Se estiver autenticado no Supabase, puxa os dados mais recentes da nuvem
+        try:
+            from services.supabase_sync import puxar_dados_do_supabase
+            puxar_dados_do_supabase()
+        except Exception:
+            pass
+
         # Ativa o modal de loading com animação de ~8s ao abrir a aba de Ajustes
         self._iniciar_carregamento_ajustes(duracao_ms=8000)
 
@@ -227,6 +234,12 @@ class ScreenAdmin(ctk.CTkToplevel):
 
     def _finalizar_carregamento_ajustes(self):
         """Oculta o overlay e recarrega os dados nos campos e tabelas de forma independente e segura."""
+        try:
+            from services.supabase_sync import puxar_dados_do_supabase
+            puxar_dados_do_supabase()
+        except Exception:
+            pass
+
         if hasattr(self, "_overlay") and self.winfo_exists():
             self._overlay.hide()
             loaders = [
