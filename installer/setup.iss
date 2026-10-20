@@ -52,5 +52,52 @@ Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs
 Name: "{autoprograms}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"
 Name: "{autodesktop}\Point Lanches"; Filename: "{app}\PointLanches.exe"; IconFilename: "{app}\assets\images.ico"; Tasks: desktopicon
 
+[InstallDelete]
+; Limpar executável e pasta interna da versão antiga antes de instalar a nova
+Type: files; Name: "{app}\PointLanches.exe"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\*.bat"
+Type: files; Name: "{app}\*temp*.exe"
+
+[Code]
+// Procedimento de limpeza profunda da versão anterior antes da instalação
+// Preserva estritamente o banco de dados (point_lanches.db) e logs de desinstalação
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  FindRec: TFindRec;
+  AppDir, ItemPath, FileName, Ext: String;
+begin
+  if CurStep = ssInstall then
+  begin
+    AppDir := ExpandConstant('{app}');
+    if DirExists(AppDir) then
+    begin
+      if FindFirst(AppDir + '\*', FindRec) then
+      begin
+        try
+          repeat
+            FileName := FindRec.Name;
+            if (FileName <> '.') and (FileName <> '..') then
+            begin
+              Ext := Lowercase(ExtractFileExt(FileName));
+              // Blindagem: NUNCA remover o banco de dados SQLite nem arquivos wal/shm
+              if (Ext <> '.db') and (Ext <> '.db-wal') and (Ext <> '.db-shm') and (Pos('unins', Lowercase(FileName)) <> 1) then
+              begin
+                ItemPath := AppDir + '\' + FileName;
+                if FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
+                  DelTree(ItemPath, True, True, True)
+                else
+                  DeleteFile(ItemPath);
+              end;
+            end;
+          until not FindNext(FindRec);
+        finally
+          FindClose(FindRec);
+        end;
+      end;
+    end;
+  end;
+end;
+
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
