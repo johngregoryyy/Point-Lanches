@@ -21,6 +21,7 @@ from printer.escpos_printer import (
 )
 from version import __version__
 from services.updater import check_for_updates
+from ui.components.widgets import habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_VERMELHO_HVR, COR_CINZA_BARRA,
@@ -67,6 +68,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._adicional_selecionado = None
         self._taxa_selecionada = None
         self._obs_selecionada = None
+        self._loading_timers: list[str] = []
 
         self._build_ui()
         if initial_tab:
@@ -75,50 +77,71 @@ class ScreenAdmin(ctk.CTkToplevel):
             except Exception:
                 pass
 
+        # Ativa o modal de loading com animação de ~8s ao abrir a aba de Ajustes
+        self._iniciar_carregamento_ajustes(duracao_ms=8000)
+
     # ── Build Abas ────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Header superior compacto com título e botões de Exportar / Importar Backup
+        # Header superior compacto com título e botões de Ação
         header_top = ctk.CTkFrame(self, height=44, fg_color="#181818", corner_radius=0)
         header_top.pack(fill="x")
         header_top.pack_propagate(False)
 
         ctk.CTkLabel(
             header_top,
-            text=f"⚙  PAINEL ADMINISTRATIVO & CONFIGURAÇÕES (v{__version__})",
+            text=f"⚙  AJUSTES & CONFIGURAÇÕES (v{__version__})",
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color=COR_PRIMARIA
         ).pack(side="left", padx=16)
 
-        ctk.CTkButton(
+        btn_atualizar = ctk.CTkButton(
             header_top,
             text="🚀  Buscar Atualizações",
-            width=160, height=30,
+            width=155, height=30,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#1E293B", hover_color="#334155",
             corner_radius=6,
             command=self._verificar_atualizacoes_manual
-        ).pack(side="right", padx=(4, 16))
+        )
+        btn_atualizar.pack(side="right", padx=(4, 16))
+        habilitar_feedback_clique(btn_atualizar, cor_flash="#334155")
 
-        ctk.CTkButton(
+        btn_recarregar = ctk.CTkButton(
+            header_top,
+            text="🔄  Recarregar Ajustes",
+            width=150, height=30,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#1E293B", hover_color="#334155",
+            corner_radius=6,
+            command=lambda: self._iniciar_carregamento_ajustes(duracao_ms=8000)
+        )
+        btn_recarregar.pack(side="right", padx=4)
+        habilitar_feedback_clique(btn_recarregar, cor_flash="#334155")
+
+        btn_importar = ctk.CTkButton(
             header_top,
             text="📂  Importar Backup",
-            width=140, height=30,
+            width=135, height=30,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#334155", hover_color="#475569",
             corner_radius=6,
             command=self._importar_backup_json
-        ).pack(side="right", padx=4)
+        )
+        btn_importar.pack(side="right", padx=4)
+        habilitar_feedback_clique(btn_importar, cor_flash="#475569")
 
-        ctk.CTkButton(
+        btn_exportar = ctk.CTkButton(
             header_top,
             text="💾  Exportar Backup",
-            width=140, height=30,
+            width=135, height=30,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HVR,
             corner_radius=6,
             command=self._exportar_backup_json
-        ).pack(side="right", padx=4)
+        )
+        btn_exportar.pack(side="right", padx=4)
+        habilitar_feedback_clique(btn_exportar, cor_flash=COR_VERDE)
 
         self._tabs = ctk.CTkTabview(self, corner_radius=10)
         self._tabs.pack(fill="both", expand=True, padx=14, pady=(8, 14))
@@ -135,9 +158,77 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._build_tab_observacoes(self._tabs.tab("📝  Obs. Rápidas"))
         self._build_tab_impressora(self._tabs.tab("🖨  Impressora"))
 
-        # Overlay de carregamento para operações assíncronas (Backup / Importação / Atualizações)
+        # Overlay de carregamento para abertura e operações assíncronas
         from ui.components.loading import LoadingOverlay
-        self._overlay = LoadingOverlay(self, text="Carregando...")
+        self._overlay = LoadingOverlay(self, text="Carregando Ajustes...")
+
+    def _iniciar_carregamento_ajustes(self, duracao_ms: int = 8000):
+        """
+        Exibe o modal/overlay com o GIF animado de loading por cerca de 8 segundos
+        enquanto realiza a leitura e validação das configurações de banco e porta do terminal,
+        garantindo uma transição visual fluida antes de renderizar os campos e opções.
+        """
+        if not hasattr(self, "_overlay"):
+            return
+
+        self._overlay.show("⚙ Carregando Ajustes & Configurações...")
+
+        # Cancelar timers pendentes anteriores
+        if hasattr(self, "_loading_timers"):
+            for tid in self._loading_timers:
+                try:
+                    self.after_cancel(tid)
+                except Exception:
+                    pass
+        self._loading_timers = []
+
+        etapas = [
+            (300,  "Conectando ao banco de dados SQLite (WAL)..."),
+            (1800, "Lendo parâmetros do terminal e dados locais..."),
+            (3600, "Validando tabelas de cardápio, adicionais e taxas..."),
+            (5400, "Verificando porta e comunicação da impressora Elgin i8..."),
+            (7200, "Consolidando dados do sistema e finalizando..."),
+            (duracao_ms, None)
+        ]
+
+        for delay, msg in etapas:
+            if msg is not None:
+                tid = self.after(delay, lambda m=msg: self._overlay.update_text(m) if hasattr(self, "_overlay") and self.winfo_exists() else None)
+                self._loading_timers.append(tid)
+            else:
+                tid = self.after(delay, self._finalizar_carregamento_ajustes)
+                self._loading_timers.append(tid)
+
+    def _finalizar_carregamento_ajustes(self):
+        """Oculta o overlay e recarrega os dados nos campos e tabelas."""
+        if hasattr(self, "_overlay") and self.winfo_exists():
+            self._overlay.hide()
+            try:
+                self._carregar_tabela()
+                self._carregar_adicionais()
+                self._carregar_taxas()
+                if hasattr(self, "_carregar_obs"):
+                    self._carregar_obs()
+                if hasattr(self, "_carregar_config_impressora"):
+                    self._carregar_config_impressora()
+            except Exception:
+                pass
+
+    def destroy(self):
+        """Garante cancelamento de todos os timers e limpeza segura do overlay."""
+        if hasattr(self, "_loading_timers"):
+            for tid in self._loading_timers:
+                try:
+                    self.after_cancel(tid)
+                except Exception:
+                    pass
+            self._loading_timers.clear()
+        if hasattr(self, "_overlay"):
+            try:
+                self._overlay.destroy()
+            except Exception:
+                pass
+        super().destroy()
 
     # ── ABA 1: CARDÁPIO ───────────────────────────────────────────────────────
 

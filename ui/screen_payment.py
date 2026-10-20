@@ -5,7 +5,7 @@ import customtkinter as ctk
 from database.db import salvar_pedido, get_config
 from printer.ticket_formatter import formatar_ticket
 from printer.escpos_printer import imprimir_ticket, show_printer_error_popup
-from ui.components.widgets import TopBar
+from ui.components.widgets import TopBar, habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_VERMELHO_HVR,
@@ -86,6 +86,7 @@ class ScreenPayment(ctk.CTkFrame):
                 command=lambda n=nome: self._selecionar_forma(n)
             )
             btn.grid(row=r, column=c, padx=5, pady=5, sticky="ew")
+            habilitar_feedback_clique(btn, cor_flash=COR_PRIMARIA_HVR, debounce_ms=100)
             self._pgto_btns[nome] = btn
 
         # ── Seção PIX (Status selecionável ou branco para caneta) ──
@@ -250,13 +251,15 @@ class ScreenPayment(ctk.CTkFrame):
         self._total_lbl.grid(row=5, column=0, sticky="ew", padx=12, pady=(1, 8))
 
         # ── Botões de ação ──
-        ctk.CTkButton(
+        btn_voltar = ctk.CTkButton(
             right, text="◀  Voltar",
             height=40, font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#444", hover_color="#555",
             corner_radius=10,
             command=self._on_back
-        ).grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 4))
+        )
+        btn_voltar.grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 4))
+        habilitar_feedback_clique(btn_voltar, cor_flash="#666", debounce_ms=200)
 
         self._btn_imprimir = ctk.CTkButton(
             right,
@@ -269,6 +272,7 @@ class ScreenPayment(ctk.CTkFrame):
             command=self._confirmar_e_imprimir
         )
         self._btn_imprimir.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
+        habilitar_feedback_clique(self._btn_imprimir, cor_flash=COR_VERDE_HVR, debounce_ms=400)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

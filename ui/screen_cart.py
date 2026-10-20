@@ -3,7 +3,7 @@
 
 import customtkinter as ctk
 from database.db import listar_categorias, listar_produtos, listar_adicionais, listar_observacoes_padrao
-from ui.components.widgets import ProductCard, CartItem, ChipButton, TopBar
+from ui.components.widgets import ProductCard, CartItem, ChipButton, TopBar, habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_CINZA_BARRA, COR_FUNDO, COR_TEXTO, COR_TEXTO_SUAVE,
@@ -101,6 +101,7 @@ class ScreenCart(ctk.CTkFrame):
             command=self._avancar
         )
         self._btn_avancar.pack(fill="x")
+        habilitar_feedback_clique(self._btn_avancar, cor_flash=COR_VERDE_HVR, debounce_ms=250)
 
     # ── Categorias ────────────────────────────────────────────────────────────
 
@@ -123,6 +124,7 @@ class ScreenCart(ctk.CTkFrame):
             command=lambda: self._selecionar_todos()
         )
         btn_todos.pack(fill="x", padx=4, pady=2)
+        habilitar_feedback_clique(btn_todos, cor_flash=COR_PRIMARIA_HVR, debounce_ms=150)
         self._btn_todos = btn_todos
 
         self._cat_btns: list[ctk.CTkButton] = []
@@ -138,6 +140,7 @@ class ScreenCart(ctk.CTkFrame):
                 command=lambda c=cat: self._selecionar_categoria(c)
             )
             btn.pack(fill="x", padx=4, pady=2)
+            habilitar_feedback_clique(btn, cor_flash="#444444", debounce_ms=150)
             self._cat_btns.append(btn)
 
         # Iniciar na aba "Todos"
@@ -287,12 +290,14 @@ class ScreenCart(ctk.CTkFrame):
             qty_var.set(qty_var.get() + 1)
             _recalcular_preco_total()
 
-        ctk.CTkButton(
+        btn_modal_dec = ctk.CTkButton(
             qty_frame, text="−", width=38, height=38,
             font=ctk.CTkFont(size=20, weight="bold"), corner_radius=8,
             fg_color="#3A3A3A", hover_color="#4A4A4A",
             command=_dec_qty
-        ).pack(side="left", padx=3, pady=4)
+        )
+        btn_modal_dec.pack(side="left", padx=3, pady=4)
+        habilitar_feedback_clique(btn_modal_dec, cor_flash="#5A2828", debounce_ms=100)
 
         qty_lbl = ctk.CTkLabel(
             qty_frame, textvariable=qty_var,
@@ -300,12 +305,14 @@ class ScreenCart(ctk.CTkFrame):
         )
         qty_lbl.pack(side="left", padx=2)
 
-        ctk.CTkButton(
+        btn_modal_inc = ctk.CTkButton(
             qty_frame, text="+", width=38, height=38,
             font=ctk.CTkFont(size=20, weight="bold"), corner_radius=8,
             fg_color=COR_VERDE, hover_color=COR_VERDE_HVR,
             command=_inc_qty
-        ).pack(side="left", padx=(3, 10), pady=4)
+        )
+        btn_modal_inc.pack(side="left", padx=(3, 10), pady=4)
+        habilitar_feedback_clique(btn_modal_inc, cor_flash=COR_VERDE_HVR, debounce_ms=100)
 
         # Botão confirmar no rodapé
         def confirmar():
@@ -338,6 +345,7 @@ class ScreenCart(ctk.CTkFrame):
             command=confirmar
         )
         btn_confirmar.grid(row=0, column=1, sticky="ew")
+        habilitar_feedback_clique(btn_confirmar, cor_flash=COR_VERDE, debounce_ms=250)
 
         # ── 2. ÁREA ROLÁVEL CENTRAL (CABEÇALHO + OBS + ADICIONAIS) ──
         scroll = ctk.CTkScrollableFrame(modal, fg_color="transparent")

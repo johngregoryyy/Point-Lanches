@@ -11,11 +11,55 @@ from config import (
 )
 
 
-class ProductCard(ctk.CTkButton):
-    """Card clicável de produto com nome e preço em destaque.
+# ── Utilitário de Feedback Visual e Prevenção de Duplo-Clique ──────────────────
 
-    on_click(nome, preco, descricao, categoria) → chamado ao clicar.
+def com_feedback_clique(botao: ctk.CTkButton, comando, cor_flash: str = None, debounce_ms: int = 180):
     """
+    Envolve o comando de um botão para:
+    1. Fornecer feedback visual/tátil imediato de clique (flash na cor de destaque).
+    2. Bloquear cliques acidentais múltiplos (debounce de 180ms para operadores de caixa).
+    """
+    bloqueado = False
+
+    def wrapper(*args, **kwargs):
+        nonlocal bloqueado
+        if bloqueado:
+            return
+        bloqueado = True
+
+        try:
+            cor_atual = botao.cget("fg_color")
+            flash = cor_flash or (COR_VERDE if cor_atual != COR_VERDE else COR_PRIMARIA_HVR)
+            botao.configure(fg_color=flash)
+            botao.after(90, lambda: botao.configure(fg_color=cor_atual) if botao.winfo_exists() else None)
+        except Exception:
+            pass
+
+        try:
+            if comando:
+                return comando(*args, **kwargs)
+        finally:
+            if botao.winfo_exists():
+                botao.after(debounce_ms, _liberar)
+
+    def _liberar():
+        nonlocal bloqueado
+        bloqueado = False
+
+    return wrapper
+
+
+def habilitar_feedback_clique(botao: ctk.CTkButton, cor_flash: str = None, debounce_ms: int = 180) -> ctk.CTkButton:
+    """Aplica o wrapper com feedback tátil e debounce a um CTkButton já existente."""
+    cmd_original = botao.cget("command")
+    if not cmd_original:
+        return botao
+    botao.configure(command=com_feedback_clique(botao, cmd_original, cor_flash=cor_flash, debounce_ms=debounce_ms))
+    return botao
+
+
+class ProductCard(ctk.CTkButton):
+    """Card clicável de produto com feedback tátil imediato e prevenção de clique duplo."""
 
     def __init__(self, master, nome: str, preco: float,
                  descricao: str = "", categoria: str = "",
@@ -24,9 +68,30 @@ class ProductCard(ctk.CTkButton):
         self._preco     = preco
         self._desc      = descricao
         self._categoria = categoria
+        self._bloqueado = False
 
         preco_fmt = f"R$ {preco:.2f}".replace(".", ",")
         label = f"{nome}\n{preco_fmt}"
+
+        def _click_handler():
+            if self._bloqueado:
+                return
+            self._bloqueado = True
+
+            # Feedback tátil imediato: borda destacada e preenchimento ativo
+            try:
+                self.configure(fg_color=COR_PRIMARIA, border_color=COR_VERDE, border_width=2)
+                self.after(100, lambda: self.configure(
+                    fg_color=COR_CINZA_CARD, border_color=COR_PRIMARIA, border_width=1
+                ) if self.winfo_exists() else None)
+            except Exception:
+                pass
+
+            try:
+                if on_click:
+                    on_click(nome, preco, descricao, categoria)
+            finally:
+                self.after(200, self._desbloquear)
 
         super().__init__(
             master,
@@ -40,13 +105,16 @@ class ProductCard(ctk.CTkButton):
             text_color=COR_TEXTO,
             border_color=COR_PRIMARIA,
             border_width=1,
-            command=lambda: on_click(nome, preco, descricao, categoria) if on_click else None,
+            command=_click_handler,
             **kwargs
         )
 
+    def _desbloquear(self):
+        self._bloqueado = False
+
 
 class ChipButton(ctk.CTkButton):
-    """Botão chip estilo pill – para seleções rápidas."""
+    """Botão chip estilo pill com feedback tátil na seleção."""
 
     def __init__(self, master, text: str, on_select=None,
                  selected=False, **kwargs):
@@ -67,6 +135,12 @@ class ChipButton(ctk.CTkButton):
         self.configure(command=self._toggle)
 
     def _toggle(self):
+        # Feedback tátil instantâneo ao clicar
+        try:
+            self.configure(border_color="#FFFFFF")
+        except Exception:
+            pass
+
         self._selected = not self._selected
         self._apply_state()
         if self._on_select:
@@ -168,13 +242,15 @@ class CartItem(ctk.CTkFrame):
         qty_frame.pack_propagate(False)
 
         # Botão Menos (-) tamanho fixo 28x28
-        ctk.CTkButton(
+        self._btn_dec = ctk.CTkButton(
             qty_frame, text="−", width=28, height=28,
             font=ctk.CTkFont(size=16, weight="bold"),
             fg_color="#3A1E1E", hover_color="#5A2828", text_color="#EF4444",
             corner_radius=14,
             command=self._decrement
-        ).pack(side="left", padx=1)
+        )
+        self._btn_dec.pack(side="left", padx=1)
+        habilitar_feedback_clique(self._btn_dec, cor_flash="#5A1E1E", debounce_ms=100)
 
         # Label Quantidade (largura fixa 30, texto centralizado)
         self._qty_lbl = ctk.CTkLabel(
@@ -185,13 +261,15 @@ class CartItem(ctk.CTkFrame):
         self._qty_lbl.pack(side="left", padx=0)
 
         # Botão Mais (+) tamanho fixo 28x28
-        ctk.CTkButton(
+        self._btn_inc = ctk.CTkButton(
             qty_frame, text="+", width=28, height=28,
             font=ctk.CTkFont(size=16, weight="bold"),
             fg_color="#1E3828", hover_color="#2A5038", text_color="#10B981",
             corner_radius=14,
             command=self._increment
-        ).pack(side="left", padx=1)
+        )
+        self._btn_inc.pack(side="left", padx=1)
+        habilitar_feedback_clique(self._btn_inc, cor_flash="#2A5038", debounce_ms=100)
 
         # 3. Preço Total (largura fixa 75, alinhado à direita)
         total = item['quantidade'] * item['preco_unit']
@@ -204,13 +282,15 @@ class CartItem(ctk.CTkFrame):
         self._preco_lbl.grid(row=0, column=2, padx=(2, 4), sticky="e")
 
         # 4. Botão Lixeira (largura fixa 30)
-        ctk.CTkButton(
+        btn_del = ctk.CTkButton(
             self, text="🗑", width=30, height=28,
             fg_color="transparent", hover_color="#3A1A1A", text_color="#EF4444",
             font=ctk.CTkFont(size=15),
             corner_radius=6,
             command=self._remove
-        ).grid(row=0, column=3, padx=(0, 6), sticky="e")
+        )
+        btn_del.grid(row=0, column=3, padx=(0, 6), sticky="e")
+        habilitar_feedback_clique(btn_del, cor_flash="#5A1A1A", debounce_ms=150)
 
     def _increment(self):
         self._item["quantidade"] += 1
@@ -271,28 +351,34 @@ class TopBar(ctk.CTkFrame):
 
         # Botões à direita (ordem inversa com side=right)
         if on_admin:
-            ctk.CTkButton(
+            btn_adm = ctk.CTkButton(
                 self, text="⚙", width=38, height=32,
                 font=ctk.CTkFont(size=18),
                 fg_color="transparent",
                 hover_color="#3A3A3A",
                 command=on_admin
-            ).pack(side="right", padx=3)
+            )
+            btn_adm.pack(side="right", padx=3)
+            habilitar_feedback_clique(btn_adm, cor_flash="#475569", debounce_ms=250)
 
         if on_balanco:
-            ctk.CTkButton(
+            btn_bal = ctk.CTkButton(
                 self, text="📊", width=38, height=32,
                 font=ctk.CTkFont(size=16),
                 fg_color="transparent",
                 hover_color="#3A3A3A",
                 command=on_balanco
-            ).pack(side="right", padx=3)
+            )
+            btn_bal.pack(side="right", padx=3)
+            habilitar_feedback_clique(btn_bal, cor_flash="#475569", debounce_ms=250)
 
         if on_historico:
-            ctk.CTkButton(
+            btn_hist = ctk.CTkButton(
                 self, text="📋", width=38, height=32,
                 font=ctk.CTkFont(size=18),
                 fg_color="transparent",
                 hover_color="#3A3A3A",
                 command=on_historico
-            ).pack(side="right", padx=3)
+            )
+            btn_hist.pack(side="right", padx=3)
+            habilitar_feedback_clique(btn_hist, cor_flash="#475569", debounce_ms=250)

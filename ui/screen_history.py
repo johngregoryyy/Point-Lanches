@@ -5,6 +5,7 @@ import customtkinter as ctk
 from database.db import listar_pedidos, get_pedido_com_itens, get_config, excluir_pedido
 from printer.ticket_formatter import formatar_ticket
 from printer.escpos_printer import imprimir_ticket, show_printer_error_popup
+from ui.components.widgets import habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_VERMELHO_HVR,
@@ -145,6 +146,7 @@ class ScreenHistory(ctk.CTkToplevel):
             command=self._confirmar_exclusao
         )
         self._btn_excluir.grid(row=0, column=0, padx=(0, 6), sticky="ew")
+        habilitar_feedback_clique(self._btn_excluir, cor_flash="#991B1B", debounce_ms=250)
 
         self._btn_reimprimir = ctk.CTkButton(
             bot_right, text="🖨  REIMPRIMIR (ELGIN i8)",
@@ -155,6 +157,7 @@ class ScreenHistory(ctk.CTkToplevel):
             command=self._reimprimir_pedido
         )
         self._btn_reimprimir.grid(row=0, column=1, padx=(6, 0), sticky="ew")
+        habilitar_feedback_clique(self._btn_reimprimir, cor_flash=COR_VERDE_HVR, debounce_ms=300)
 
     def _carregar_pedidos(self):
         for w in self._pedidos_scroll.winfo_children():
@@ -205,6 +208,7 @@ class ScreenHistory(ctk.CTkToplevel):
                 command=lambda pid=ped_id: self._selecionar_pedido(pid)
             )
             btn.pack(fill="x", pady=2, padx=2)
+            habilitar_feedback_clique(btn, cor_flash="#38BDF8", debounce_ms=100)
             self._botoes_pedidos[ped_id] = btn
 
         # Selecionar o primeiro da lista automaticamente

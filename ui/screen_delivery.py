@@ -2,7 +2,7 @@ import re
 import unicodedata
 import customtkinter as ctk
 from database.db import listar_taxas, listar_ruas
-from ui.components.widgets import TopBar, ChipButton
+from ui.components.widgets import TopBar, ChipButton, habilitar_feedback_clique
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_CINZA_BARRA, COR_FUNDO, COR_TEXTO, COR_TEXTO_SUAVE,
@@ -272,21 +272,25 @@ class ScreenDelivery(ctk.CTkFrame):
         nav_frame.columnconfigure(0, weight=1)
         nav_frame.columnconfigure(1, weight=1)
 
-        ctk.CTkButton(
+        btn_voltar = ctk.CTkButton(
             nav_frame, text="◀  Voltar",
             height=42, font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#444", hover_color="#555",
             corner_radius=10,
             command=self._on_back
-        ).grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        )
+        btn_voltar.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        habilitar_feedback_clique(btn_voltar, cor_flash="#666", debounce_ms=200)
 
-        ctk.CTkButton(
+        btn_avancar = ctk.CTkButton(
             nav_frame, text="Avançar para Pagamento  ➜",
             height=42, font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=COR_VERDE, hover_color=COR_VERDE_HVR,
             corner_radius=10,
             command=self._avancar
-        ).grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        )
+        btn_avancar.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        habilitar_feedback_clique(btn_avancar, cor_flash=COR_VERDE_HVR, debounce_ms=250)
 
     # ── Helpers e Grid de Ruas ────────────────────────────────────────────────
 
@@ -322,6 +326,7 @@ class ScreenDelivery(ctk.CTkFrame):
                 command=lambda nome=rua: self._selecionar_rua(nome)
             )
             btn.grid(row=r, column=c, padx=3, pady=3, sticky="ew")
+            habilitar_feedback_clique(btn, cor_flash=COR_PRIMARIA_HVR, debounce_ms=100)
             self._rua_botoes.append((rua, btn))
 
     def _carregar_ruas(self):
