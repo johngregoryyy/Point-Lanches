@@ -165,6 +165,11 @@ def puxar_dados_do_supabase(timeout: int = 8) -> bool:
         return True
     except Exception as e:
         print(f"Aviso: Não foi possível sincronizar catálogo do Supabase: {e}")
+        try:
+            from services.error_logger import log_exception
+            log_exception(modulo="supabase_sync", exc=e, contexto="Falha ao puxar catálogo do Supabase", tipo="SUPABASE")
+        except Exception:
+            pass
         return False
 
 
@@ -393,6 +398,11 @@ def sincronizar_pedidos_com_supabase(timeout: int = 8) -> bool:
         return True
     except Exception as e:
         print(f"Aviso ao sincronizar pedidos com Supabase: {e}")
+        try:
+            from services.error_logger import log_exception
+            log_exception(modulo="supabase_sync", exc=e, contexto="Falha na sincronização de pedidos", tipo="SUPABASE")
+        except Exception:
+            pass
         return False
 
 
@@ -400,11 +410,85 @@ def sincronizar_pedidos_com_supabase(timeout: int = 8) -> bool:
 sincronizar_pedidos_pendentes_supabase = sincronizar_pedidos_com_supabase
 
 
+def sincronizar_log_supabase_async(log_id: int, log_data: Dict[str, Any]):
+    """Envia o log de erro para o Supabase em segundo plano com fallback transparente."""
+    def _worker():
+        try:
+            from database.db import get_connection
+
+            payload = {
+                "tipo": log_data.get("tipo", "ERRO"),
+                "modulo": log_data.get("modulo", ""),
+                "mensagem": str(log_data.get("mensagem", ""))[:500],
+                "detalhes": str(log_data.get("detalhes", ""))[:4000],
+                "versao_app": str(log_data.get("versao_app", "1.1.6"))
+            }
+
+            try:
+                resp = _fazer_requisicao("logs_erro", metodo="POST", dados=[payload], timeout=5)
+                if resp and len(resp) > 0:
+                    supa_id = resp[0].get("id")
+                    if supa_id:
+                        with get_connection() as conn:
+                            conn.execute("UPDATE logs_erro SET supabase_id=? WHERE id=?", (supa_id, log_id))
+                            conn.commit()
+                        return
+            except urllib.error.HTTPError as he:
+                if he.code == 404:
+                    # Tabela logs_erro ainda não criada no Supabase Dashboard
+                    # Fallback de contingência: grava na tabela configuracoes
+                    try:
+                        cfg_payload = {
+                            "chave": "ultimo_log_erro",
+                            "valor": json.dumps(payload, ensure_ascii=False)
+                        }
+                        _fazer_requisicao("configuracoes", metodo="POST", dados=[cfg_payload], timeout=4)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def sincronizar_logs_pendentes_supabase(timeout: int = 5):
+    """Envia logs de erro locais ainda não sincronizados para o Supabase."""
+    try:
+        from database.db import get_connection
+
+        with get_connection() as conn:
+            pendentes = conn.execute("SELECT * FROM logs_erro WHERE supabase_id IS NULL ORDER BY id ASC LIMIT 50").fetchall()
+            for row in pendentes:
+                r = dict(row)
+                payload = {
+                    "tipo": r.get("tipo", "ERRO"),
+                    "modulo": r.get("modulo", ""),
+                    "mensagem": str(r.get("mensagem", ""))[:500],
+                    "detalhes": str(r.get("detalhes", ""))[:4000],
+                    "versao_app": str(r.get("versao_app", "1.1.6"))
+                }
+                try:
+                    resp = _fazer_requisicao("logs_erro", metodo="POST", dados=[payload], timeout=timeout)
+                    if resp and len(resp) > 0:
+                        supa_id = resp[0].get("id")
+                        if supa_id:
+                            conn.execute("UPDATE logs_erro SET supabase_id=? WHERE id=?", (supa_id, r["id"]))
+                except urllib.error.HTTPError as he:
+                    if he.code == 404:
+                        break  # Tabela logs_erro ainda não criada no Supabase
+                except Exception:
+                    pass
+            conn.commit()
+    except Exception:
+        pass
+
+
 def sincronizar_tudo_com_supabase(timeout: int = 8) -> bool:
-    """Executa sincronização bidirecional completa: pedidos e catálogo."""
+    """Executa sincronização bidirecional completa: pedidos, catálogo e logs."""
     try:
         sincronizar_pedidos_com_supabase(timeout=timeout)
         puxar_dados_do_supabase(timeout=timeout)
+        sincronizar_logs_pendentes_supabase(timeout=timeout)
         return True
     except Exception as e:
         print(f"Erro na sincronização completa: {e}")

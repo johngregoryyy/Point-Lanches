@@ -16,6 +16,8 @@ from ui.screen_payment import ScreenPayment
 from ui.screen_admin import ScreenAdmin
 from ui.screen_history import ScreenHistory
 from ui.screen_balanco import ScreenBalanco
+from ui.screen_logs import ScreenLogs
+from services.error_logger import setup_global_exception_handlers
 
 
 # ── Configuração global do CustomTkinter ──────────────────────────────────────
@@ -73,6 +75,9 @@ class App(ctk.CTk):
         # ── Sincronização automática com Supabase ao fechar a janela ──────────
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar_aplicacao)
 
+        # ── Interceptação global de erros do sistema (UI, threads e exceções) ──
+        setup_global_exception_handlers(self)
+
         if not start_hidden:
             self.setup_ui()
             self.mostrar_janela_principal()
@@ -92,6 +97,7 @@ class App(ctk.CTk):
             container, state=self._state,
             on_next=lambda: self._mostrar("delivery"),
             on_admin=self._abrir_admin,
+            on_logs=self._abrir_logs,
             on_historico=self._abrir_historico,
             on_balanco=self._abrir_balanco,
             on_login=self._abrir_login,
@@ -176,6 +182,11 @@ class App(ctk.CTk):
         """Abre a janela isolada de Balanço Geral / Relatórios Financeiros."""
         balanco = ScreenBalanco(self)
         balanco.focus()
+
+    def _abrir_logs(self):
+        """Abre a janela de diagnóstico e logs de erro do sistema."""
+        logs_win = ScreenLogs(self)
+        logs_win.focus()
 
     def _recarregar_dados_sistema(self):
         """Atualiza cardápio, produtos e taxas das telas quando configurações são importadas."""

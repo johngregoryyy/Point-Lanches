@@ -377,3 +377,17 @@ Sempre que fizer alterações no código Python:
   - Valores impressos ao lado dos itens de bebidas (`_formatar_item_aumentado`).
   - Subtotal, Taxa de Entrega e Total com fonte ampliada (altura dupla + negrito `CMD_ITEM_ON`).
   - Telefone fixo `(51) 3564-1305` removido, exibindo exclusivamente os celulares `(51) 99919-1721 | (51) 98034-8622`.
+
+### 9.6. Central de Logs de Erros, Diagnóstico e Auditoria em Tempo Real (v1.1.6)
+- **Captura Global e Automática de Erros (`services/error_logger.py`):**
+  - Interceptação global de falhas em tempo de execução via `sys.excepthook`, `threading.excepthook` e `Tk.report_callback_exception`.
+  - Captura estruturada de falhas de impressão térmica (Elgin i8 offline/desconectada), erros de rede e sincronização REST com o Supabase.
+- **Persistência Local e Nuvem (`logs_erro`):**
+  - Tabela `logs_erro` no SQLite com indexação cronológica (`idx_logs_erro_data`), registrando data/hora, tipo, módulo, mensagem, traceback detalhado, versão do app e `supabase_id`.
+  - Envio assíncrono para o Supabase REST sem travar a interface do caixa, com fallback de contingência na tabela `configuracoes` (`chave = 'ultimo_log_erro'`).
+- **Interface Gráfica Dedicada (`ScreenLogs` / `ui/screen_logs.py`):**
+  - Botão de acesso direto `📜` na `TopBar` da tela inicial de cardápio, posicionado ao lado do botão de Ajustes (`⚙`).
+  - Visualização dividida em duas colunas:
+    - **Esquerda:** Registros cronológicos agrupados por data (Hoje, Ontem, etc.) e hora, com badges visuais coloridos por tipo de falha (`ERRO`, `EXCEÇÃO`, `IMPRESSORA`, `SUPABASE`, `AVISO`) e indicador de sincronização na nuvem.
+    - **Direita:** Painel de detalhes técnicos com metadados completos, mensagem descritiva, caixa de texto com o traceback/stacktrace completo em fonte monoespaçada e botão de cópia rápida para o clipboard (`📋 Copiar Detalhes do Erro`).
+  - Filtro por tipo de log, atualização manual com sincronização imediata (`🔄 Atualizar`) e limpeza com diálogo de confirmação (`🗑️ Limpar Logs`).

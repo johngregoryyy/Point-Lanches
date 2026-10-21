@@ -257,6 +257,18 @@ SCHEMA_TABELAS_PADRAO = {
             atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(rua, numero)
         )
+    """,
+    "logs_erro": """
+        CREATE TABLE IF NOT EXISTS logs_erro (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_hora   TEXT DEFAULT (datetime('now', 'localtime')),
+            tipo        TEXT DEFAULT 'ERRO',
+            modulo      TEXT DEFAULT '',
+            mensagem    TEXT NOT NULL,
+            detalhes    TEXT DEFAULT '',
+            versao_app  TEXT DEFAULT '1.1.6',
+            supabase_id INTEGER DEFAULT NULL
+        )
     """
 }
 
@@ -305,6 +317,13 @@ COLUNAS_TABELAS_PADRAO = {
         "bairro": "TEXT DEFAULT ''",
         "taxa_frete": "REAL DEFAULT 0.0",
         "atualizado_em": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    },
+    "logs_erro": {
+        "tipo": "TEXT DEFAULT 'ERRO'",
+        "modulo": "TEXT DEFAULT ''",
+        "detalhes": "TEXT DEFAULT ''",
+        "versao_app": "TEXT DEFAULT '1.1.6'",
+        "supabase_id": "INTEGER DEFAULT NULL",
     }
 }
 
@@ -387,7 +406,8 @@ def executar_migracoes_retrocompativeis(db_path: str = None) -> int:
                 "CREATE INDEX IF NOT EXISTS idx_hist_end_rua_num ON historico_enderecos(rua, numero);",
                 "CREATE INDEX IF NOT EXISTS idx_taxas_ordem ON taxas_entrega(ordem, ativo);",
                 "CREATE INDEX IF NOT EXISTS idx_obs_ativo ON observacoes_padrao(ativo);",
-                "CREATE INDEX IF NOT EXISTS idx_pedidos_supabase_id ON pedidos(supabase_id);"
+                "CREATE INDEX IF NOT EXISTS idx_pedidos_supabase_id ON pedidos(supabase_id);",
+                "CREATE INDEX IF NOT EXISTS idx_logs_erro_data ON logs_erro(data_hora);"
             ]
             for idx_sql in indices:
                 conn.execute(idx_sql)
@@ -2016,5 +2036,60 @@ def importar_dados_json(dados: dict) -> tuple[bool, str]:
         return True, "Configurações importadas e aplicadas com sucesso!"
     except Exception as e:
         return False, f"Falha na importação: {str(e)}"
+
+
+# ── Logs de Erros ─────────────────────────────────────────────────────────────
+
+def registrar_log_erro(modulo: str, mensagem: str, detalhes: str = "", tipo: str = "ERRO") -> int:
+    """Registra uma ocorrência de erro localmente no SQLite e agenda envio assíncrono para o Supabase."""
+    from version import __version__
+    log_id = 0
+    try:
+        with get_connection() as conn:
+            cur = conn.execute("""
+                INSERT INTO logs_erro (tipo, modulo, mensagem, detalhes, versao_app)
+                VALUES (?, ?, ?, ?, ?)
+            """, (tipo.upper(), modulo, str(mensagem), str(detalhes), __version__))
+            log_id = cur.lastrowid
+            conn.commit()
+    except Exception as e:
+        print(f"Falha ao registrar log de erro no SQLite: {e}")
+
+    if log_id:
+        try:
+            from services.supabase_sync import sincronizar_log_supabase_async
+            sincronizar_log_supabase_async(log_id, {
+                "tipo": tipo.upper(),
+                "modulo": modulo,
+                "mensagem": str(mensagem),
+                "detalhes": str(detalhes),
+                "versao_app": __version__
+            })
+        except Exception:
+            pass
+
+    return log_id
+
+
+def listar_logs_erro(limite: int = 300, tipo_filtro: str = None) -> list[dict]:
+    """Retorna os logs de erro ordenados por data e hora decrescente (mais recentes primeiro)."""
+    with get_connection() as conn:
+        q = "SELECT * FROM logs_erro"
+        params = []
+        if tipo_filtro and tipo_filtro != "TODOS":
+            q += " WHERE tipo = ?"
+            params.append(tipo_filtro.upper())
+        q += " ORDER BY id DESC LIMIT ?"
+        params.append(limite)
+        rows = conn.execute(q, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def limpar_logs_erro() -> bool:
+    """Limpa todos os logs de erro registrados no banco local."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM logs_erro")
+        conn.commit()
+    return True
 
 

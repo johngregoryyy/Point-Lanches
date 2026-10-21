@@ -324,7 +324,7 @@ class TopBar(ctk.CTkFrame):
     """Barra superior com logo, título e botões de ação."""
 
     def __init__(self, master, titulo: str,
-                 on_admin=None, on_historico=None, on_balanco=None, on_login=None, on_sync=None, **kwargs):
+                 on_admin=None, on_historico=None, on_balanco=None, on_logs=None, on_login=None, on_sync=None, **kwargs):
         super().__init__(master, height=48, corner_radius=0,
                          fg_color=COR_CINZA_BARRA, **kwargs)
         self.pack_propagate(False)
@@ -369,6 +369,17 @@ class TopBar(ctk.CTkFrame):
             )
             btn_adm.pack(side="right", padx=3)
             habilitar_feedback_clique(btn_adm, cor_flash="#475569", debounce_ms=250)
+
+        if on_logs:
+            btn_logs = ctk.CTkButton(
+                self, text="📜", width=38, height=32,
+                font=ctk.CTkFont(size=17),
+                fg_color="transparent",
+                hover_color="#3A3A3A",
+                command=on_logs
+            )
+            btn_logs.pack(side="right", padx=3)
+            habilitar_feedback_clique(btn_logs, cor_flash="#475569", debounce_ms=250)
 
         if on_balanco:
             btn_bal = ctk.CTkButton(

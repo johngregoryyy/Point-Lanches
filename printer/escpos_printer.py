@@ -394,6 +394,11 @@ def imprimir_ticket(arg1, arg2=None, on_success=None, on_error=None) -> None:
             if on_success:
                 on_success()
         except Exception as e:
+            try:
+                from services.error_logger import log_exception
+                log_exception(modulo="printer", exc=e, contexto=f"Falha de impressão em '{destino}'", tipo="IMPRESSORA")
+            except Exception:
+                pass
             if on_error:
                 on_error(str(e))
 

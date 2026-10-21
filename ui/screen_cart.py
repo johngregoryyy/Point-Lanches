@@ -17,12 +17,13 @@ class ScreenCart(ctk.CTkFrame):
     """Tela 1 – Cardápio por categorias + Carrinho lateral."""
 
     def __init__(self, master, state: dict, on_next, on_admin,
-                 on_historico=None, on_balanco=None, on_login=None, on_sync=None, **kwargs):
+                 on_historico=None, on_balanco=None, on_logs=None, on_login=None, on_sync=None, **kwargs):
         super().__init__(master, fg_color=COR_FUNDO, **kwargs)
         self._state        = state
         self._on_next      = on_next
         self._on_historico = on_historico
         self._on_balanco   = on_balanco
+        self._on_logs      = on_logs
         self._on_login     = on_login
         self._on_sync      = on_sync
         self._cat_atual    = None     # None = Todos
@@ -48,6 +49,7 @@ class ScreenCart(ctk.CTkFrame):
         self._topbar = TopBar(
             self, "Cardápio",
             on_admin=on_admin,
+            on_logs=self._on_logs,
             on_historico=self._on_historico,
             on_balanco=self._on_balanco,
             on_login=self._on_login,
