@@ -406,3 +406,15 @@ Sempre que fizer alterações no código Python:
   - Implementado cache global de frames (`_GIF_CACHE`) e amostragem inteligente de quadros do GIF de carregamento (`BILINEAR`), eliminando a sobrecarga de 150 frames de redimensionamento Lanczos que bloqueava a CPU no carregamento.
 - **Segurança de Encoding no Logger de Erros:**
   - Tratamento com fallback ASCII em `_safe_print` no `error_logger.py`, impedindo que caracteres Unicode (emojis de botões e abas) causem exceções silenciosas de encoding (`cp1252`) no Windows.
+
+### 9.8. Sincronização Persistente de Categorias e Ordenação Cronológica Estrita (v1.1.8)
+- **Persistência e Sincronização Global da Classificação de Bebidas:**
+  - Identificada incompatibilidade de schema onde a tabela `categorias` no Supabase não possui a coluna `eh_bebida`, provocando falhas HTTP 400 (`PGRST204: Could not find the 'eh_bebida' column of 'categorias' in the schema cache`) que abortavam atualizações de categorias (nome, ordem e status).
+  - Implementado canal de propagação global via tabela `configuracoes` sob a chave `categorias_bebidas` (mapa JSON `{id: eh_bebida}`), sincronizado assincronamente via upsert (`resolution=merge-duplicates`).
+  - Removida auto-marcação agressiva em `listar_categorias()` que sobrescrevia a escolha do operador toda vez que o catálogo era lido.
+  - O motor de sincronização `puxar_dados_do_supabase` agora une o mapa compartilhado na nuvem ao estado local (`_resolver_eh_bebida`), garantindo persistência absoluta das preferências em todos os terminais sem sobrescrever bebidas para zero.
+  - Para a tabela remota `categorias`, o sistema envia estritamente os campos aceitos pelo schema (`id`, `nome`, `ordem`), prevenindo erros 400.
+- **Ordenação Cronológica Rigorosa no Histórico de Pedidos:**
+  - Corrigida a consulta `listar_pedidos` que utilizava `ORDER BY id DESC`. Quando múltiplos terminais criavam pedidos ou quando o histórico era sincronizado do Supabase, `id`s locais auto-incrementados causavam inversões e desordem visual nas comandas.
+  - Nova consulta força ordenação cronológica estrita: `SELECT * FROM pedidos ORDER BY COALESCE(datetime(criado_em), criado_em) DESC, numero DESC, id DESC LIMIT ?`.
+  - Garante que novos pedidos e comandas importadas da nuvem apareçam sempre na ordem exata de criação (mais recentes no topo).

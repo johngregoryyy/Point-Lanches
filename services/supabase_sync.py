@@ -30,13 +30,13 @@ def normalizar_data_iso(data_str: str) -> str:
         return str(data_str)[:19]
 
 
-def _fazer_requisicao(endpoint: str, metodo: str = "GET", dados: Any = None, timeout: int = 8) -> Any:
+def _fazer_requisicao(endpoint: str, metodo: str = "GET", dados: Any = None, timeout: int = 8, prefer: Optional[str] = None) -> Any:
     url, _ = _get_credentials()
     full_url = f"{url}/rest/v1/{endpoint}"
 
     for tentativa in range(2):
         headers = auth_manager.get_auth_headers()
-        headers["Prefer"] = "return=representation"
+        headers["Prefer"] = prefer if prefer else "return=representation"
 
         ctx = ssl._create_unverified_context()
         body = json.dumps(dados).encode("utf-8") if dados is not None else None
@@ -102,7 +102,35 @@ def puxar_dados_do_supabase(timeout: int = 8) -> bool:
         with get_connection() as conn:
             conn.execute("PRAGMA foreign_keys = OFF;")
 
+            # Carregar mapeamento compartilhado de bebidas e preservar o local
+            cat_bebidas_map = {}
+            if cfg_data:
+                for cfg in cfg_data:
+                    if cfg.get("chave") == "categorias_bebidas":
+                        try:
+                            cat_bebidas_map = json.loads(cfg.get("valor") or "{}")
+                        except Exception:
+                            pass
+            try:
+                local_bebidas = {row[0]: row[1] for row in conn.execute("SELECT id, eh_bebida FROM categorias").fetchall()}
+            except Exception:
+                local_bebidas = {}
+
             if cat_data is not None:
+                def _resolver_eh_bebida(c):
+                    cid = c["id"]
+                    str_cid = str(cid)
+                    if str_cid in cat_bebidas_map:
+                        return int(cat_bebidas_map[str_cid])
+                    if cid in cat_bebidas_map:
+                        return int(cat_bebidas_map[cid])
+                    if "eh_bebida" in c and c["eh_bebida"] is not None:
+                        return int(c["eh_bebida"])
+                    if cid in local_bebidas and local_bebidas[cid] is not None:
+                        return int(local_bebidas[cid])
+                    nome_lower = c.get("nome", "").lower()
+                    return 1 if any(b in nome_lower for b in ["bebida", "refrigerante", "cerveja", "suco", "água", "agua"]) else 0
+
                 conn.execute("DELETE FROM categorias;")
                 conn.executemany(
                     "INSERT INTO categorias (id, nome, ordem, eh_bebida) VALUES (?, ?, ?, ?);",
@@ -111,7 +139,7 @@ def puxar_dados_do_supabase(timeout: int = 8) -> bool:
                             c["id"],
                             c["nome"],
                             c.get("ordem", 0),
-                            int(c["eh_bebida"]) if "eh_bebida" in c and c["eh_bebida"] is not None else (1 if "bebida" in c.get("nome", "").lower() else 0)
+                            _resolver_eh_bebida(c)
                         )
                         for c in cat_data
                     ]
@@ -173,12 +201,12 @@ def puxar_dados_do_supabase(timeout: int = 8) -> bool:
         return False
 
 
-def sincronizar_item_supabase_async(tabela: str, dados: Any, metodo: str = "POST", query_params: str = ""):
+def sincronizar_item_supabase_async(tabela: str, dados: Any, metodo: str = "POST", query_params: str = "", prefer: Optional[str] = None):
     """Envia alteração em segundo plano para o Supabase se autenticado."""
     def _worker():
         try:
             endpoint = f"{tabela}{'?' + query_params if query_params else ''}"
-            _fazer_requisicao(endpoint, metodo=metodo, dados=dados)
+            _fazer_requisicao(endpoint, metodo=metodo, dados=dados, prefer=prefer)
         except Exception:
             pass
 

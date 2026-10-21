@@ -556,17 +556,6 @@ def listar_categorias(incluir_extras=False):
             conn.execute("ALTER TABLE categorias ADD COLUMN eh_bebida INTEGER DEFAULT 0")
         except Exception:
             pass
-        try:
-            # Auto-marcação inicial se existir categoria de bebidas e eh_bebida ainda desmarcado
-            conn.execute(
-                "UPDATE categorias SET eh_bebida=1 WHERE "
-                "(LOWER(nome) LIKE '%bebida%' OR LOWER(nome) LIKE '%refrigerante%' OR "
-                "LOWER(nome) LIKE '%cerveja%' OR LOWER(nome) LIKE '%suco%' OR "
-                "LOWER(nome) LIKE '%agua%' OR LOWER(nome) LIKE '%água%') "
-                "AND (eh_bebida IS NULL OR eh_bebida=0)"
-            )
-        except Exception:
-            pass
         q = "SELECT * FROM categorias"
         if not incluir_extras:
             q += " WHERE LOWER(nome) != 'extras'"
@@ -641,6 +630,44 @@ def remover_produto(produto_id):
         pass
 
 
+def _sincronizar_mapa_categorias_bebidas(conn=None):
+    """
+    Sincroniza o mapa de categorias de bebidas na tabela global 'configuracoes'
+    tanto localmente no SQLite quanto na nuvem Supabase via upsert.
+    Isso contorna a limitação de schema da tabela remota 'categorias' (sem coluna eh_bebida)
+    e propaga a classificação para todos os terminais.
+    """
+    import json
+    def _exec(c):
+        mapa = {}
+        for r in c.execute("SELECT id, eh_bebida FROM categorias").fetchall():
+            mapa[str(r["id"])] = int(r["eh_bebida"] or 0)
+        mapa_json = json.dumps(mapa)
+        c.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('categorias_bebidas', ?)", (mapa_json,))
+        return mapa_json
+
+    mapa_json = None
+    if conn is not None:
+        mapa_json = _exec(conn)
+    else:
+        with get_connection() as c:
+            mapa_json = _exec(c)
+            c.commit()
+
+    if mapa_json is not None:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async(
+                "configuracoes",
+                {"chave": "categorias_bebidas", "valor": mapa_json},
+                metodo="POST",
+                query_params="on_conflict=chave",
+                prefer="resolution=merge-duplicates,return=representation"
+            )
+        except Exception:
+            pass
+
+
 def adicionar_categoria(nome, ordem=0, eh_bebida=0):
     with get_connection() as conn:
         cur = conn.execute("INSERT OR IGNORE INTO categorias (nome, ordem, eh_bebida) VALUES (?, ?, ?)", (nome, ordem, int(eh_bebida)))
@@ -648,13 +675,17 @@ def adicionar_categoria(nome, ordem=0, eh_bebida=0):
         if not cat_id or cat_id == 0:
             r = conn.execute("SELECT id FROM categorias WHERE nome=?", (nome,)).fetchone()
             cat_id = r["id"] if r else None
+        conn.commit()
 
     if cat_id:
         try:
             from services.supabase_sync import sincronizar_item_supabase_async
-            sincronizar_item_supabase_async("categorias", {"id": cat_id, "nome": nome, "ordem": ordem, "eh_bebida": int(eh_bebida)}, metodo="POST")
+            # Supabase 'categorias' possui apenas (id, nome, ordem). NÃO enviar eh_bebida para evitar HTTP 400
+            sincronizar_item_supabase_async("categorias", {"id": cat_id, "nome": nome, "ordem": ordem}, metodo="POST")
         except Exception:
             pass
+        if eh_bebida:
+            _sincronizar_mapa_categorias_bebidas()
     return cat_id
 
 
@@ -670,27 +701,29 @@ def atualizar_categoria(categoria_id, novo_nome, nova_ordem=None, eh_bebida=None
         if eh_bebida is not None:
             campos.append("eh_bebida=?")
             params.append(int(eh_bebida))
-            payload["eh_bebida"] = int(eh_bebida)
+            # Supabase 'categorias' NÃO possui coluna eh_bebida. Não adicionar ao payload de 'categorias'.
         params.append(categoria_id)
         sql = f"UPDATE categorias SET {', '.join(campos)} WHERE id=?"
         conn.execute(sql, tuple(params))
+        conn.commit()
 
     try:
         from services.supabase_sync import sincronizar_item_supabase_async
+        # Sincroniza nome e ordem com a tabela categorias no Supabase
         sincronizar_item_supabase_async("categorias", payload, metodo="PATCH", query_params=f"id=eq.{categoria_id}")
     except Exception:
         pass
 
+    if eh_bebida is not None:
+        _sincronizar_mapa_categorias_bebidas()
+
 
 def atualizar_categoria_eh_bebida(categoria_id: int, eh_bebida: int):
-    """Atualiza de forma rápida se a categoria é de bebidas (1) ou lanches/comida (0)."""
+    """Atualiza se a categoria é de bebidas (1) ou lanches/comida (0) e propaga para todos os terminais."""
     with get_connection() as conn:
         conn.execute("UPDATE categorias SET eh_bebida=? WHERE id=?", (int(eh_bebida), categoria_id))
-    try:
-        from services.supabase_sync import sincronizar_item_supabase_async
-        sincronizar_item_supabase_async("categorias", {"eh_bebida": int(eh_bebida)}, metodo="PATCH", query_params=f"id=eq.{categoria_id}")
-    except Exception:
-        pass
+        conn.commit()
+    _sincronizar_mapa_categorias_bebidas()
 
 
 def contar_produtos_por_categoria(categoria_id: int, apenas_ativos: bool = False) -> int:
@@ -705,11 +738,13 @@ def contar_produtos_por_categoria(categoria_id: int, apenas_ativos: bool = False
 def remover_categoria(categoria_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM categorias WHERE id=?", (categoria_id,))
+        conn.commit()
     try:
         from services.supabase_sync import sincronizar_item_supabase_async
         sincronizar_item_supabase_async("categorias", None, metodo="DELETE", query_params=f"id=eq.{categoria_id}")
     except Exception:
         pass
+    _sincronizar_mapa_categorias_bebidas()
 
 
 def get_categoria_por_nome(nome):
@@ -918,7 +953,7 @@ def salvar_pedido(pedido: dict, itens: list) -> int:
 def listar_pedidos(limit=100):
     with get_connection() as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT * FROM pedidos ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM pedidos ORDER BY COALESCE(datetime(criado_em), criado_em) DESC, numero DESC, id DESC LIMIT ?", (limit,)
         ).fetchall()]
 
 
