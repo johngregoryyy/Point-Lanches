@@ -64,6 +64,18 @@ def _col2(left: str, right: str, bold=False) -> bytes:
     return data
 
 
+def _col2_item(left: str, right: str, bold: bool = True) -> bytes:
+    """
+    Imprime 2 colunas com o mesmo tamanho aumentado dos itens de comida
+    (GS ! \x01: Altura Dupla + Negrito em 48 colunas).
+    """
+    right = right[-COL:]
+    left  = left[:COL - len(right)]
+    line  = left.ljust(COL - len(right)) + right
+    cmd_bold = CMD_BOLD_ON if bold else CMD_BOLD_OFF
+    return CMD_ALIGN_LEFT + CMD_ITEM_ON + cmd_bold + _encode(line[:COL]) + CMD_FEED_LINE + CMD_ITEM_OFF
+
+
 def _col3(qty: str, name: str, val: str) -> bytes:
     """4 + (COL-12) + 8 = COL colunas."""
     qty_w  = 4
@@ -138,11 +150,13 @@ def _formatar_item_aumentado(qtd_str: str, nome: str, val_str: str, obs: str = "
 
 def _is_bebida(item: dict) -> bool:
     """Identifica se o item é da categoria Bebidas."""
+    if item.get("eh_bebida"):
+        return True
     cat = str(item.get("categoria", "")).lower().strip()
-    if cat == "bebidas":
+    if any(k in cat for k in ["bebida", "refrigerante", "cerveja", "suco", "agua", "água"]):
         return True
     nome = str(item.get("nome", "")).lower()
-    palavras = ["coca", "pepsi", "guaraná", "guarana", "refrigerante", "água", "agua", "cerveja", "suco", "lata 350ml"]
+    palavras = ["coca", "pepsi", "guaraná", "guarana", "refrigerante", "água", "agua", "cerveja", "suco", "lata 350ml", "lata 475ml", "2 litros", "600 ml"]
     return any(p in nome for p in palavras)
 
 
@@ -237,38 +251,45 @@ def formatar_ticket(pedido: dict, itens: list, numero: int) -> bytes:
             )
         buf += _linha("-")
 
-    # ── 7. SEÇÃO BEBIDAS / GELADEIRA EM 2X (GS ! \x11) ──
+    # ── 7. SEÇÃO BEBIDAS / GELADEIRA (COM VALORES) ──
     if bebidas:
         buf += _linha("=")
         buf += _centro("*** BEBIDAS / GELADEIRA ***", bold=True)
         buf += _linha("-")
+        buf += CMD_ALIGN_LEFT + CMD_BOLD_ON
+        buf += _col3("QTD", "ITEM", "VALOR")
+        buf += CMD_BOLD_OFF
+        buf += _linha("-")
 
-        linhas_bebidas = []
         for b in bebidas:
             qtd = b.get("quantidade", 1)
             nome_b = b.get("nome", "").upper()
-            linhas_bebidas.append(f"{qtd}x {nome_b}")
+            preco_b = b.get("preco_unit", 0.0)
             obs_b = b.get("observacao", "").strip()
-            if obs_b:
-                linhas_bebidas.append(f" Obs: {obs_b}")
+            total_b = qtd * preco_b
+            val_formatado = f"{total_b:.2f}".replace(".", ",")
 
-        buf += _imprimir_2x(linhas_bebidas)
+            buf += _formatar_item_aumentado(
+                qtd_str=f"{qtd}x",
+                nome=nome_b,
+                val_str=val_formatado,
+                obs=obs_b
+            )
         buf += _linha("=")
 
-    # ── 8. Totais do Pedido ──
+    # ── 8. Totais do Pedido (Mesmo tamanho aumentado dos itens de comida) ──
     subtotal     = pedido.get("subtotal", 0)
     taxa_entrega = pedido.get("taxa_entrega", 0)
     total        = pedido.get("total", 0)
 
-    sub_str   = f"{subtotal:.2f}".replace(".", ",")
-    taxa_str  = f"{taxa_entrega:.2f}".replace(".", ",")
-    total_str = f"{total:.2f}".replace(".", ",")
+    sub_str   = f"R$ {subtotal:.2f}".replace(".", ",")
+    taxa_str  = f"R$ {taxa_entrega:.2f}".replace(".", ",")
+    total_str = f"R$ {total:.2f}".replace(".", ",")
 
-    buf += _col2("Subtotal:", f"R$ {sub_str}")
-    buf += _col2("Taxa de Entrega:", f"R$ {taxa_str}")
-    buf += CMD_BOLD_ON
-    buf += _col2("TOTAL:", f"R$ {total_str}", bold=True)
-    buf += CMD_BOLD_OFF
+    buf += _col2_item("Subtotal:", sub_str, bold=True)
+    buf += _col2_item("Taxa de Entrega:", taxa_str, bold=True)
+    buf += _linha("-")
+    buf += _col2_item("TOTAL:", total_str, bold=True)
     buf += _linha("-")
 
     # ── 9. FORMA DE PAGAMENTO EM 2X (GS ! \x11) ──

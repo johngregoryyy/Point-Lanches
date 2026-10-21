@@ -100,8 +100,43 @@ class SupabaseAuthManager:
             return self._session["user"].get("email", "")
         return ""
 
+    def refresh_session(self) -> bool:
+        """Renova o token JWT de acesso utilizando o refresh_token salvo."""
+        if not self._session or not self._session.get("refresh_token"):
+            return False
+
+        url, key = _get_credentials()
+        endpoint = f"{url}/auth/v1/token?grant_type=refresh_token"
+        payload = json.dumps({"refresh_token": self._session["refresh_token"]}).encode("utf-8")
+        headers = {
+            "apikey": key,
+            "Content-Type": "application/json"
+        }
+        ctx = ssl._create_unverified_context()
+        req = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
+
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                self._session = data
+                try:
+                    with open(_get_auth_file_path(), "w", encoding="utf-8") as f:
+                        json.dump(data, f)
+                except Exception:
+                    pass
+                return True
+        except Exception as e:
+            print(f"Falha ao renovar token Supabase: {e}")
+            return False
+
     def get_auth_headers(self) -> Dict[str, str]:
-        """Retorna headers para requisições autenticadas no Supabase REST."""
+        """Retorna headers para requisições autenticadas no Supabase REST com auto-renovação de token."""
+        import time
+        if self.is_authenticated():
+            expires_at = self._session.get("expires_at")
+            if expires_at and time.time() >= (expires_at - 60):
+                self.refresh_session()
+
         url, key = _get_credentials()
         headers = {
             "apikey": key,

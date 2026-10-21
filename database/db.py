@@ -4,6 +4,10 @@
 import sqlite3
 import os
 import sys
+import threading
+
+_local_conn = threading.local()
+_CACHED_DB_PATH = None
 
 
 def _can_write_to_dir(folder: str) -> bool:
@@ -88,18 +92,44 @@ def get_resource_path(relative_path: str = "") -> str:
 
 
 def get_db_path() -> str:
-    return os.path.join(get_base_dir(), "point_lanches.db")
+    global _CACHED_DB_PATH
+    if _CACHED_DB_PATH is None:
+        _CACHED_DB_PATH = os.path.join(get_base_dir(), "point_lanches.db")
+    return _CACHED_DB_PATH
 
 
 DB_PATH = get_db_path()
 
 
 def get_connection():
+    """
+    Retorna conexão SQLite reutilizável por thread com PRAGMAs de alta performance:
+    - WAL Mode + synchronous NORMAL
+    - 64MB Cache de memória RAM
+    - Temp store em memória
+    - Reuso transparente de conexão eliminando centenas de I/O de abertura/fechamento de arquivo.
+    """
+    conn = getattr(_local_conn, "conn", None)
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+            return conn
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+
     db_file = get_db_path()
-    conn = sqlite3.connect(db_file)
+    conn = sqlite3.connect(db_file, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA cache_size=-64000;")
+    conn.execute("PRAGMA temp_store=MEMORY;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    _local_conn.conn = conn
     return conn
 
 
@@ -108,9 +138,10 @@ def get_connection():
 SCHEMA_TABELAS_PADRAO = {
     "categorias": """
         CREATE TABLE IF NOT EXISTS categorias (
-            id    INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome  TEXT NOT NULL UNIQUE,
-            ordem INTEGER DEFAULT 0
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome      TEXT NOT NULL UNIQUE,
+            ordem     INTEGER DEFAULT 0,
+            eh_bebida INTEGER DEFAULT 0
         )
     """,
     "produtos": """
@@ -158,7 +189,8 @@ SCHEMA_TABELAS_PADRAO = {
             valor_pago      REAL DEFAULT 0,
             troco           REAL DEFAULT 0,
             status          TEXT DEFAULT 'fechado',
-            criado_em       TEXT DEFAULT (datetime('now','localtime'))
+            criado_em       TEXT DEFAULT (datetime('now','localtime')),
+            supabase_id     INTEGER DEFAULT NULL
         )
     """,
     "itens_pedido": """
@@ -231,6 +263,7 @@ SCHEMA_TABELAS_PADRAO = {
 COLUNAS_TABELAS_PADRAO = {
     "categorias": {
         "ordem": "INTEGER DEFAULT 0",
+        "eh_bebida": "INTEGER DEFAULT 0",
     },
     "taxas_entrega": {
         "ordem": "INTEGER DEFAULT 0",
@@ -248,6 +281,7 @@ COLUNAS_TABELAS_PADRAO = {
         "troco": "REAL DEFAULT 0",
         "status": "TEXT DEFAULT 'fechado'",
         "criado_em": "TEXT DEFAULT (datetime('now','localtime'))",
+        "supabase_id": "INTEGER DEFAULT NULL",
     },
     "ruas": {
         "bairro": "TEXT DEFAULT ''",
@@ -339,6 +373,24 @@ def executar_migracoes_retrocompativeis(db_path: str = None) -> int:
                 from database.seed import OBS_PADRAO
                 for texto in OBS_PADRAO:
                     conn.execute("INSERT INTO observacoes_padrao (texto, ativo) VALUES (?, 1)", (texto,))
+        except Exception:
+            pass
+
+        # 6. Índices de alta performance para velocidade máxima nas consultas
+        try:
+            indices = [
+                "CREATE INDEX IF NOT EXISTS idx_produtos_cat_ativo ON produtos(categoria_id, ativo);",
+                "CREATE INDEX IF NOT EXISTS idx_pedidos_numero ON pedidos(numero);",
+                "CREATE INDEX IF NOT EXISTS idx_pedidos_criado_em ON pedidos(criado_em);",
+                "CREATE INDEX IF NOT EXISTS idx_itens_pedido_id ON itens_pedido(pedido_id);",
+                "CREATE INDEX IF NOT EXISTS idx_ruas_ativo_nome ON ruas(ativo, nome);",
+                "CREATE INDEX IF NOT EXISTS idx_hist_end_rua_num ON historico_enderecos(rua, numero);",
+                "CREATE INDEX IF NOT EXISTS idx_taxas_ordem ON taxas_entrega(ordem, ativo);",
+                "CREATE INDEX IF NOT EXISTS idx_obs_ativo ON observacoes_padrao(ativo);",
+                "CREATE INDEX IF NOT EXISTS idx_pedidos_supabase_id ON pedidos(supabase_id);"
+            ]
+            for idx_sql in indices:
+                conn.execute(idx_sql)
         except Exception:
             pass
 
@@ -480,6 +532,21 @@ def listar_categorias(incluir_extras=False):
             conn.execute("ALTER TABLE categorias ADD COLUMN ordem INTEGER DEFAULT 0")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE categorias ADD COLUMN eh_bebida INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            # Auto-marcação inicial se existir categoria de bebidas e eh_bebida ainda desmarcado
+            conn.execute(
+                "UPDATE categorias SET eh_bebida=1 WHERE "
+                "(LOWER(nome) LIKE '%bebida%' OR LOWER(nome) LIKE '%refrigerante%' OR "
+                "LOWER(nome) LIKE '%cerveja%' OR LOWER(nome) LIKE '%suco%' OR "
+                "LOWER(nome) LIKE '%agua%' OR LOWER(nome) LIKE '%água%') "
+                "AND (eh_bebida IS NULL OR eh_bebida=0)"
+            )
+        except Exception:
+            pass
         q = "SELECT * FROM categorias"
         if not incluir_extras:
             q += " WHERE LOWER(nome) != 'extras'"
@@ -494,14 +561,14 @@ def listar_produtos(categoria_id=None):
     with get_connection() as conn:
         if categoria_id:
             rows = conn.execute(
-                "SELECT p.*, c.nome as categoria FROM produtos p "
+                "SELECT p.*, c.nome as categoria, COALESCE(c.eh_bebida, 0) as eh_bebida FROM produtos p "
                 "JOIN categorias c ON c.id = p.categoria_id "
                 "WHERE p.categoria_id=? AND p.ativo=1 ORDER BY p.nome",
                 (categoria_id,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT p.*, c.nome as categoria FROM produtos p "
+                "SELECT p.*, c.nome as categoria, COALESCE(c.eh_bebida, 0) as eh_bebida FROM produtos p "
                 "JOIN categorias c ON c.id = p.categoria_id "
                 "WHERE p.ativo=1 ORDER BY c.id, p.nome"
             ).fetchall()
@@ -554,9 +621,9 @@ def remover_produto(produto_id):
         pass
 
 
-def adicionar_categoria(nome, ordem=0):
+def adicionar_categoria(nome, ordem=0, eh_bebida=0):
     with get_connection() as conn:
-        cur = conn.execute("INSERT OR IGNORE INTO categorias (nome, ordem) VALUES (?, ?)", (nome, ordem))
+        cur = conn.execute("INSERT OR IGNORE INTO categorias (nome, ordem, eh_bebida) VALUES (?, ?, ?)", (nome, ordem, int(eh_bebida)))
         cat_id = cur.lastrowid
         if not cat_id or cat_id == 0:
             r = conn.execute("SELECT id FROM categorias WHERE nome=?", (nome,)).fetchone()
@@ -565,30 +632,43 @@ def adicionar_categoria(nome, ordem=0):
     if cat_id:
         try:
             from services.supabase_sync import sincronizar_item_supabase_async
-            sincronizar_item_supabase_async("categorias", {"id": cat_id, "nome": nome, "ordem": ordem}, metodo="POST")
+            sincronizar_item_supabase_async("categorias", {"id": cat_id, "nome": nome, "ordem": ordem, "eh_bebida": int(eh_bebida)}, metodo="POST")
         except Exception:
             pass
     return cat_id
 
 
-def atualizar_categoria(categoria_id, novo_nome, nova_ordem=None):
+def atualizar_categoria(categoria_id, novo_nome, nova_ordem=None, eh_bebida=None):
     with get_connection() as conn:
+        campos = ["nome=?"]
+        params = [novo_nome]
+        payload = {"nome": novo_nome}
         if nova_ordem is not None:
-            conn.execute(
-                "UPDATE categorias SET nome=?, ordem=? WHERE id=?",
-                (novo_nome, nova_ordem, categoria_id)
-            )
-            payload = {"nome": novo_nome, "ordem": nova_ordem}
-        else:
-            conn.execute(
-                "UPDATE categorias SET nome=? WHERE id=?",
-                (novo_nome, categoria_id)
-            )
-            payload = {"nome": novo_nome}
+            campos.append("ordem=?")
+            params.append(nova_ordem)
+            payload["ordem"] = nova_ordem
+        if eh_bebida is not None:
+            campos.append("eh_bebida=?")
+            params.append(int(eh_bebida))
+            payload["eh_bebida"] = int(eh_bebida)
+        params.append(categoria_id)
+        sql = f"UPDATE categorias SET {', '.join(campos)} WHERE id=?"
+        conn.execute(sql, tuple(params))
 
     try:
         from services.supabase_sync import sincronizar_item_supabase_async
         sincronizar_item_supabase_async("categorias", payload, metodo="PATCH", query_params=f"id=eq.{categoria_id}")
+    except Exception:
+        pass
+
+
+def atualizar_categoria_eh_bebida(categoria_id: int, eh_bebida: int):
+    """Atualiza de forma rápida se a categoria é de bebidas (1) ou lanches/comida (0)."""
+    with get_connection() as conn:
+        conn.execute("UPDATE categorias SET eh_bebida=? WHERE id=?", (int(eh_bebida), categoria_id))
+    try:
+        from services.supabase_sync import sincronizar_item_supabase_async
+        sincronizar_item_supabase_async("categorias", {"eh_bebida": int(eh_bebida)}, metodo="PATCH", query_params=f"id=eq.{categoria_id}")
     except Exception:
         pass
 
@@ -805,7 +885,9 @@ def salvar_pedido(pedido: dict, itens: list) -> int:
     try:
         from services.supabase_sync import enviar_pedido_supabase_async
         pedido_sync = dict(pedido)
-        pedido_sync["numero"] = numero
+        pedido_sync["numero_pedido"] = numero
+        pedido_sync["id_local"] = pedido_id
+        pedido_sync["endereco_num"] = pedido.get("numero", "")
         enviar_pedido_supabase_async(pedido_sync, itens)
     except Exception:
         pass
@@ -834,10 +916,25 @@ def get_pedido_com_itens(pedido_id: int):
 
 
 def excluir_pedido(pedido_id: int) -> bool:
-    """Exclui um pedido e seus itens associados."""
+    """Exclui um pedido e seus itens associados (localmente e no Supabase)."""
+    supabase_id = None
     with get_connection() as conn:
+        try:
+            row = conn.execute("SELECT supabase_id FROM pedidos WHERE id=?", (pedido_id,)).fetchone()
+            if row and "supabase_id" in row.keys():
+                supabase_id = row["supabase_id"]
+        except Exception:
+            pass
         conn.execute("DELETE FROM itens_pedido WHERE pedido_id=?", (pedido_id,))
         conn.execute("DELETE FROM pedidos WHERE id=?", (pedido_id,))
+
+    if supabase_id:
+        try:
+            from services.supabase_sync import sincronizar_item_supabase_async
+            sincronizar_item_supabase_async("itens_pedido", dados=None, metodo="DELETE", query_params=f"pedido_id=eq.{supabase_id}")
+            sincronizar_item_supabase_async("pedidos", dados=None, metodo="DELETE", query_params=f"id=eq.{supabase_id}")
+        except Exception:
+            pass
     return True
 
 
@@ -946,6 +1043,183 @@ def ranking_produtos_vendidos(mes: int = None, ano: int = None) -> list[dict]:
         """
         rows = conn.execute(q, (prefix,)).fetchall()
         return [dict(r) for r in rows]
+
+
+def obter_estatisticas_pico(mes: int = None, ano: int = None) -> dict:
+    """
+    Calcula as estatísticas de horários e dias de maior pico de pedidos
+    para o período informado (mês/ano ou ano completo).
+    Retorna métricas consolidadas com ordenação e percentuais de participação.
+    """
+    if mes and mes > 0:
+        prefix = f"{ano:04d}-{mes:02d}%"
+    else:
+        prefix = f"{ano:04d}-%"
+
+    with get_connection() as conn:
+        # Total de pedidos e faturamento no período
+        row_tot = conn.execute("""
+            SELECT COUNT(*) as tot, COALESCE(SUM(total), 0.0) as fat
+            FROM pedidos
+            WHERE criado_em LIKE ? AND (status IS NULL OR status != 'cancelado')
+        """, (prefix,)).fetchone()
+        tot_ped = row_tot["tot"] if row_tot else 0
+        fat_ped = float(row_tot["fat"]) if row_tot else 0.0
+
+        # 1. Picos por Horário do Dia (00h às 23h)
+        rows_horas = conn.execute("""
+            SELECT 
+                strftime('%H', criado_em) as hora,
+                COUNT(*) as qtd,
+                COALESCE(SUM(total), 0.0) as total
+            FROM pedidos
+            WHERE criado_em LIKE ? AND (status IS NULL OR status != 'cancelado')
+            GROUP BY strftime('%H', criado_em)
+            ORDER BY hora ASC
+        """, (prefix,)).fetchall()
+
+        horas_dict = {f"{h:02d}": {"qtd": 0, "total": 0.0} for h in range(24)}
+        for r in rows_horas:
+            h_str = r["hora"]
+            if h_str in horas_dict:
+                horas_dict[h_str] = {"qtd": int(r["qtd"]), "total": float(r["total"])}
+
+        horas_com_pedidos = {h: v for h, v in horas_dict.items() if v["qtd"] > 0}
+        if not horas_com_pedidos:
+            horas_para_exibir = [f"{h:02d}" for h in range(11, 24)]
+        else:
+            min_h = min(int(h) for h in horas_com_pedidos.keys())
+            max_h = max(int(h) for h in horas_com_pedidos.keys())
+            min_h = max(0, min(min_h, 17))
+            max_h = min(23, max(max_h, 23))
+            horas_para_exibir = [f"{h:02d}" for h in range(min_h, max_h + 1)]
+
+        lista_horas = []
+        max_qtd_hora = 0
+        hora_pico = None
+        for h_str in horas_para_exibir:
+            d = horas_dict[h_str]
+            h_int = int(h_str)
+            h_prox = (h_int + 1) % 24
+            rotulo = f"{h_str}:00 às {h_prox:02d}:00"
+            part = (d["qtd"] / tot_ped * 100) if tot_ped > 0 else 0.0
+            item = {
+                "hora": h_str,
+                "rotulo": rotulo,
+                "qtd": d["qtd"],
+                "total": d["total"],
+                "part": part
+            }
+            lista_horas.append(item)
+            if d["qtd"] > max_qtd_hora:
+                max_qtd_hora = d["qtd"]
+                hora_pico = item
+
+        # 2. Picos por Dia da Semana (0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb)
+        nomes_dias = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"]
+        icones_dias = ["☀️", "💼", "📋", "🍔", "🛵", "🍻", "🎉"]
+        dias_dict = {i: {"qtd": 0, "total": 0.0} for i in range(7)}
+
+        rows_dias = conn.execute("""
+            SELECT 
+                strftime('%w', criado_em) as dia_sem,
+                COUNT(*) as qtd,
+                COALESCE(SUM(total), 0.0) as total
+            FROM pedidos
+            WHERE criado_em LIKE ? AND (status IS NULL OR status != 'cancelado')
+            GROUP BY strftime('%w', criado_em)
+        """, (prefix,)).fetchall()
+
+        for r in rows_dias:
+            try:
+                d_idx = int(r["dia_sem"])
+                if d_idx in dias_dict:
+                    dias_dict[d_idx] = {"qtd": int(r["qtd"]), "total": float(r["total"])}
+            except Exception:
+                pass
+
+        lista_dias = []
+        max_qtd_dia = 0
+        dia_pico = None
+        for i in range(7):
+            d = dias_dict[i]
+            part = (d["qtd"] / tot_ped * 100) if tot_ped > 0 else 0.0
+            item = {
+                "dia_idx": i,
+                "nome": nomes_dias[i],
+                "icone": icones_dias[i],
+                "qtd": d["qtd"],
+                "total": d["total"],
+                "part": part
+            }
+            lista_dias.append(item)
+            if d["qtd"] > max_qtd_dia:
+                max_qtd_dia = d["qtd"]
+                dia_pico = item
+
+        # 3. Evolução Diária (se mensal) ou Mensal (se anual)
+        if mes and mes > 0:
+            rows_cal = conn.execute("""
+                SELECT 
+                    strftime('%d', criado_em) as chave,
+                    COUNT(*) as qtd,
+                    COALESCE(SUM(total), 0.0) as total
+                FROM pedidos
+                WHERE criado_em LIKE ? AND (status IS NULL OR status != 'cancelado')
+                GROUP BY strftime('%d', criado_em)
+                ORDER BY chave ASC
+            """, (prefix,)).fetchall()
+            lista_periodo = [
+                {
+                    "rotulo": f"Dia {r['chave']}",
+                    "qtd": int(r["qtd"]),
+                    "total": float(r["total"]),
+                    "part": (int(r["qtd"]) / tot_ped * 100) if tot_ped > 0 else 0.0
+                }
+                for r in rows_cal
+            ]
+        else:
+            meses_nomes_curtos = [
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+            ]
+            rows_cal = conn.execute("""
+                SELECT 
+                    strftime('%m', criado_em) as chave,
+                    COUNT(*) as qtd,
+                    COALESCE(SUM(total), 0.0) as total
+                FROM pedidos
+                WHERE criado_em LIKE ? AND (status IS NULL OR status != 'cancelado')
+                GROUP BY strftime('%m', criado_em)
+                ORDER BY chave ASC
+            """, (prefix,)).fetchall()
+            cal_dict = {f"{m:02d}": {"qtd": 0, "total": 0.0} for m in range(1, 13)}
+            for r in rows_cal:
+                k = r["chave"]
+                if k in cal_dict:
+                    cal_dict[k] = {"qtd": int(r["qtd"]), "total": float(r["total"])}
+            lista_periodo = []
+            for m in range(1, 13):
+                k = f"{m:02d}"
+                d = cal_dict[k]
+                part = (d["qtd"] / tot_ped * 100) if tot_ped > 0 else 0.0
+                lista_periodo.append({
+                    "rotulo": f"{meses_nomes_curtos[m-1]}/{ano}",
+                    "qtd": d["qtd"],
+                    "total": d["total"],
+                    "part": part
+                })
+
+        return {
+            "tot_pedidos": tot_ped,
+            "fat_total": fat_ped,
+            "horas": lista_horas,
+            "hora_pico": hora_pico,
+            "dias_semana": lista_dias,
+            "dia_pico": dia_pico,
+            "periodo": lista_periodo,
+            "is_mensal": bool(mes and mes > 0)
+        }
 
 
 

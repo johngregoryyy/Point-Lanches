@@ -4,7 +4,7 @@
 from datetime import datetime
 import customtkinter as ctk
 
-from database.db import calcular_balanco_mensal, ranking_produtos_vendidos
+from database.db import calcular_balanco_mensal, ranking_produtos_vendidos, obter_estatisticas_pico
 from config import (
     COR_PRIMARIA, COR_PRIMARIA_HVR, COR_VERDE, COR_VERDE_HVR,
     COR_VERMELHO, COR_VERMELHO_HVR, COR_CINZA_BARRA,
@@ -235,6 +235,49 @@ class ScreenBalanco(ctk.CTkToplevel):
 
         self._table_rows_frame = ctk.CTkFrame(table_card, fg_color="transparent")
         self._table_rows_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+        # ── 5B. Gráfico Visual de Picos de Pedidos (Horários e Dias) ──
+        picos_card = ctk.CTkFrame(scroll, fg_color=COR_CINZA_BARRA, corner_radius=10)
+        picos_card.pack(fill="x", pady=(0, 12))
+        picos_card.columnconfigure(0, weight=1)
+
+        picos_top = ctk.CTkFrame(picos_card, fg_color="transparent")
+        picos_top.pack(fill="x", padx=16, pady=(12, 6))
+
+        ctk.CTkLabel(
+            picos_top,
+            text="⏰  HORÁRIOS & DIAS DE MAIOR PICO DE PEDIDOS",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=COR_PRIMARIA
+        ).pack(side="left")
+
+        # Seletor de visualização dos picos: Por Horário, Por Dia da Semana, Evolução
+        self._seg_picos_tipo = ctk.CTkSegmentedButton(
+            picos_top,
+            values=["⏰ Por Horário do Dia", "📅 Por Dia da Semana", "📆 Evolução Diária / Mensal"],
+            command=lambda _: self._renderizar_grafico_picos(),
+            height=28, font=ctk.CTkFont(size=11, weight="bold"),
+            selected_color=COR_PRIMARIA, selected_hover_color=COR_PRIMARIA_HVR
+        )
+        self._seg_picos_tipo.set("⏰ Por Horário do Dia")
+        self._seg_picos_tipo.pack(side="right")
+
+        # Banner de Destaque / Resumo do Pico (ex: Horário mais movimentado)
+        self._picos_highlight_frame = ctk.CTkFrame(picos_card, fg_color="#1E2430", corner_radius=8, height=36)
+        self._picos_highlight_frame.pack(fill="x", padx=16, pady=(2, 10))
+        self._picos_highlight_frame.pack_propagate(False)
+
+        self._lbl_picos_destaque = ctk.CTkLabel(
+            self._picos_highlight_frame,
+            text="🔥 Identificando horário de maior movimento...",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#F59E0B"
+        )
+        self._lbl_picos_destaque.pack(side="left", padx=12, pady=6)
+
+        # Container dos gráficos/barras
+        self._picos_container = ctk.CTkFrame(picos_card, fg_color="transparent")
+        self._picos_container.pack(fill="x", padx=16, pady=(0, 14))
 
         # ── 6. Relatório / Ranking Completo de Vendas por Item do Cardápio ──
         ranking_card = ctk.CTkFrame(scroll, fg_color=COR_CINZA_BARRA, corner_radius=10)
@@ -500,6 +543,10 @@ class ScreenBalanco(ctk.CTkToplevel):
                     text_color=conf["cor"] if part > 0 else COR_TEXTO_SUAVE
                 ).grid(row=0, column=3, padx=(8, 12), sticky="e")
 
+            # ── Carregar e Renderizar Picos de Pedidos (Horários e Dias) ──
+            self._estatisticas_pico = obter_estatisticas_pico(mes=mes, ano=ano)
+            self._renderizar_grafico_picos()
+
             # ── Carregar e Renderizar Ranking de Produtos Vendidos ──
             self._produtos_ranking_dados = ranking_produtos_vendidos(mes=mes, ano=ano)
             self._filtrar_ranking_produtos()
@@ -507,6 +554,213 @@ class ScreenBalanco(ctk.CTkToplevel):
         finally:
             if hasattr(self, "_overlay"):
                 self._overlay.hide()
+
+    def _renderizar_grafico_picos(self):
+        """Renderiza o gráfico de barras dos horários ou dias de maior pico de pedidos."""
+        if not hasattr(self, "_estatisticas_pico") or not self._estatisticas_pico:
+            return
+
+        for w in self._picos_container.winfo_children():
+            w.destroy()
+
+        stats = self._estatisticas_pico
+        modo = self._seg_picos_tipo.get()
+        tot_ped = stats["tot_pedidos"]
+
+        if tot_ped == 0:
+            self._lbl_picos_destaque.configure(
+                text="ℹ️ Nenhum pedido registrado no período selecionado.",
+                text_color=COR_TEXTO_SUAVE
+            )
+            ctk.CTkLabel(
+                self._picos_container,
+                text="Sem dados para exibir gráficos de pico neste período.",
+                font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE
+            ).pack(pady=16)
+            return
+
+        if modo == "⏰ Por Horário do Dia":
+            hp = stats.get("hora_pico")
+            if hp and hp["qtd"] > 0:
+                hp_val_fmt = f"R$ {hp['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                self._lbl_picos_destaque.configure(
+                    text=f"🔥 Horário de Maior Pico: {hp['rotulo']} com {hp['qtd']} pedidos ({hp['part']:.1f}% do total) — {hp_val_fmt}",
+                    text_color="#F59E0B"
+                )
+            else:
+                self._lbl_picos_destaque.configure(
+                    text="⏰ Distribuição de pedidos por faixa horária do dia.",
+                    text_color="#38BDF8"
+                )
+
+            itens = stats["horas"]
+            max_qtd = max((it["qtd"] for it in itens), default=1) or 1
+
+            for it in itens:
+                row = ctk.CTkFrame(self._picos_container, fg_color="transparent", height=32)
+                row.pack(fill="x", pady=3)
+                row.pack_propagate(False)
+
+                eh_pico = (hp and it["hora"] == hp["hora"] and it["qtd"] > 0)
+                cor_barra = "#F59E0B" if eh_pico else (COR_PRIMARIA if it["qtd"] > 0 else "#262D3D")
+                cor_txt = "#F59E0B" if eh_pico else (COR_TEXTO if it["qtd"] > 0 else COR_TEXTO_SUAVE)
+
+                lbl_txt = f"{'🔥 ' if eh_pico else '⏰ '}{it['rotulo']}"
+                ctk.CTkLabel(
+                    row, text=lbl_txt,
+                    font=ctk.CTkFont(size=12, weight="bold" if eh_pico else "normal"),
+                    text_color=cor_txt, width=170, anchor="w"
+                ).pack(side="left", padx=(4, 8))
+
+                prop = (it["qtd"] / max_qtd) if max_qtd > 0 else 0.0
+                bar = ctk.CTkProgressBar(
+                    row, height=16, corner_radius=8,
+                    fg_color="#262D3D", progress_color=cor_barra
+                )
+                bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
+                bar.set(prop)
+
+                ctk.CTkLabel(
+                    row, text=f"{it['qtd']} ped.",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=cor_txt, width=65, anchor="e"
+                ).pack(side="left", padx=4)
+
+                val_fmt = f"R$ {it['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                ctk.CTkLabel(
+                    row, text=val_fmt,
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COR_VERDE if it["total"] > 0 else COR_TEXTO_SUAVE,
+                    width=100, anchor="e"
+                ).pack(side="left", padx=4)
+
+                ctk.CTkLabel(
+                    row, text=f"({it['part']:.1f}%)",
+                    font=ctk.CTkFont(size=11),
+                    text_color=COR_TEXTO_SUAVE, width=65, anchor="e"
+                ).pack(side="left", padx=(4, 0))
+
+        elif modo == "📅 Por Dia da Semana":
+            dp = stats.get("dia_pico")
+            if dp and dp["qtd"] > 0:
+                dp_val_fmt = f"R$ {dp['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                self._lbl_picos_destaque.configure(
+                    text=f"🏆 Dia Mais Movimentado da Semana: {dp['nome']} com {dp['qtd']} pedidos ({dp['part']:.1f}% do total) — {dp_val_fmt}",
+                    text_color="#F59E0B"
+                )
+            else:
+                self._lbl_picos_destaque.configure(
+                    text="📅 Volume de vendas por dia da semana (Domingo a Sábado).",
+                    text_color="#38BDF8"
+                )
+
+            itens = stats["dias_semana"]
+            max_qtd = max((it["qtd"] for it in itens), default=1) or 1
+
+            for it in itens:
+                row = ctk.CTkFrame(self._picos_container, fg_color="transparent", height=32)
+                row.pack(fill="x", pady=3)
+                row.pack_propagate(False)
+
+                eh_pico = (dp and it["dia_idx"] == dp["dia_idx"] and it["qtd"] > 0)
+                cor_barra = "#F59E0B" if eh_pico else (COR_AZUL_POINT if it["qtd"] > 0 else "#262D3D")
+                cor_txt = "#F59E0B" if eh_pico else (COR_TEXTO if it["qtd"] > 0 else COR_TEXTO_SUAVE)
+
+                lbl_txt = f"{it['icone']}  {it['nome']}"
+                ctk.CTkLabel(
+                    row, text=lbl_txt,
+                    font=ctk.CTkFont(size=12, weight="bold" if eh_pico else "normal"),
+                    text_color=cor_txt, width=170, anchor="w"
+                ).pack(side="left", padx=(4, 8))
+
+                prop = (it["qtd"] / max_qtd) if max_qtd > 0 else 0.0
+                bar = ctk.CTkProgressBar(
+                    row, height=16, corner_radius=8,
+                    fg_color="#262D3D", progress_color=cor_barra
+                )
+                bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
+                bar.set(prop)
+
+                ctk.CTkLabel(
+                    row, text=f"{it['qtd']} ped.",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=cor_txt, width=65, anchor="e"
+                ).pack(side="left", padx=4)
+
+                val_fmt = f"R$ {it['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                ctk.CTkLabel(
+                    row, text=val_fmt,
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COR_VERDE if it["total"] > 0 else COR_TEXTO_SUAVE,
+                    width=100, anchor="e"
+                ).pack(side="left", padx=4)
+
+                ctk.CTkLabel(
+                    row, text=f"({it['part']:.1f}%)",
+                    font=ctk.CTkFont(size=11),
+                    text_color=COR_TEXTO_SUAVE, width=65, anchor="e"
+                ).pack(side="left", padx=(4, 0))
+
+        else:  # "📆 Evolução Diária / Mensal"
+            is_mensal = stats.get("is_mensal", True)
+            if is_mensal:
+                self._lbl_picos_destaque.configure(
+                    text="📆 Evolução de vendas dia a dia no mês selecionado.",
+                    text_color="#38BDF8"
+                )
+            else:
+                self._lbl_picos_destaque.configure(
+                    text="📆 Distribuição mensal acumulada ao longo do ano.",
+                    text_color="#38BDF8"
+                )
+
+            itens = stats["periodo"]
+            max_qtd = max((it["qtd"] for it in itens), default=1) or 1
+
+            for it in itens:
+                if it["qtd"] == 0 and len(itens) > 12:
+                    continue  # Omite dias vazios para manter layout limpo
+
+                row = ctk.CTkFrame(self._picos_container, fg_color="transparent", height=32)
+                row.pack(fill="x", pady=3)
+                row.pack_propagate(False)
+
+                cor_barra = "#818CF8" if it["qtd"] > 0 else "#262D3D"
+                cor_txt = COR_TEXTO if it["qtd"] > 0 else COR_TEXTO_SUAVE
+
+                ctk.CTkLabel(
+                    row, text=f"📌  {it['rotulo']}",
+                    font=ctk.CTkFont(size=12, weight="bold" if it["qtd"] > 0 else "normal"),
+                    text_color=cor_txt, width=170, anchor="w"
+                ).pack(side="left", padx=(4, 8))
+
+                prop = (it["qtd"] / max_qtd) if max_qtd > 0 else 0.0
+                bar = ctk.CTkProgressBar(
+                    row, height=16, corner_radius=8,
+                    fg_color="#262D3D", progress_color=cor_barra
+                )
+                bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
+                bar.set(prop)
+
+                ctk.CTkLabel(
+                    row, text=f"{it['qtd']} ped.",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=cor_txt, width=65, anchor="e"
+                ).pack(side="left", padx=4)
+
+                val_fmt = f"R$ {it['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                ctk.CTkLabel(
+                    row, text=val_fmt,
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COR_VERDE if it["total"] > 0 else COR_TEXTO_SUAVE,
+                    width=100, anchor="e"
+                ).pack(side="left", padx=4)
+
+                ctk.CTkLabel(
+                    row, text=f"({it['part']:.1f}%)",
+                    font=ctk.CTkFont(size=11),
+                    text_color=COR_TEXTO_SUAVE, width=65, anchor="e"
+                ).pack(side="left", padx=(4, 0))
 
     def _filtrar_ranking_produtos(self):
         """Filtra e renderiza as linhas da tabela de produtos vendidos."""
@@ -627,6 +881,17 @@ class ScreenBalanco(ctk.CTkToplevel):
                 val = f"R$ {item['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 part = (item["total"] / dados["faturamento_total"] * 100) if dados["faturamento_total"] > 0 else 0.0
                 linhas.append(f"• {k}: {val} ({item['qtd']} pedidos - {part:.1f}%)")
+
+        if hasattr(self, "_estatisticas_pico") and self._estatisticas_pico:
+            hp = self._estatisticas_pico.get("hora_pico")
+            dp = self._estatisticas_pico.get("dia_pico")
+            if (hp and hp["qtd"] > 0) or (dp and dp["qtd"] > 0):
+                linhas.append("")
+                linhas.append("--- PICOS DE MOVIMENTO ---")
+                if hp and hp["qtd"] > 0:
+                    linhas.append(f"• Horário de Maior Pico: {hp['rotulo']} ({hp['qtd']} pedidos - {hp['part']:.1f}%)")
+                if dp and dp["qtd"] > 0:
+                    linhas.append(f"• Dia Mais Movimentado: {dp['nome']} ({dp['qtd']} pedidos - {dp['part']:.1f}%)")
 
         if self._produtos_ranking_dados:
             linhas.append("")

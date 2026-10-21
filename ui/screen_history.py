@@ -76,12 +76,24 @@ class ScreenHistory(ctk.CTkToplevel):
             text_color=COR_PRIMARIA
         ).pack(side="left", padx=16)
 
+        def _on_atualizar_click():
+            self._carregar_pedidos()
+            import threading
+            def _bg_sync():
+                try:
+                    from services.supabase_sync import sincronizar_pedidos_com_supabase
+                    if sincronizar_pedidos_com_supabase(timeout=5):
+                        self.after(0, self._carregar_pedidos)
+                except Exception:
+                    pass
+            threading.Thread(target=_bg_sync, daemon=True).start()
+
         ctk.CTkButton(
             top, text="🔄  Atualizar Lista", width=140, height=34,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#333", hover_color="#444",
             corner_radius=8,
-            command=self._carregar_pedidos
+            command=_on_atualizar_click
         ).pack(side="right", padx=16)
 
         # Corpo dividido em Lista (esquerda) e Detalhes/Extrato (direita)

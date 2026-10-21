@@ -68,6 +68,7 @@ class App(ctk.CTk):
         self._state: dict = {}
         self._reset_state()
         self._telas: dict[str, ctk.CTkFrame] = {}
+        self._admin_window: ScreenAdmin | None = None
 
         # ── Sincronização automática com Supabase ao fechar a janela ──────────
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar_aplicacao)
@@ -120,9 +121,24 @@ class App(ctk.CTk):
         # Iniciar no cardápio
         self._mostrar("cart")
 
+        # Pré-aquece a janela administrativa em background para abertura instantânea (0ms)
+        self.after(500, self._pre_aquecer_admin)
+
         # Checagem não-bloqueante de atualização via GitHub Releases (2s após carregar a UI)
         if CHECK_UPDATES_ON_STARTUP:
             self.after(2000, lambda: check_updates_background(self))
+
+    def _pre_aquecer_admin(self):
+        """Pré-aquece a janela administrativa em background para abertura instantânea (0ms)."""
+        if getattr(self, "_admin_window", None) is None or not self._admin_window.winfo_exists():
+            try:
+                self._admin_window = ScreenAdmin(
+                    self,
+                    on_refresh=self._recarregar_dados_sistema,
+                    start_hidden=True
+                )
+            except Exception as e:
+                print(f"Aviso pre-warm admin: {e}")
 
     def mostrar_janela_principal(self):
         """Torna a janela visível e aplica zoom em telas HD."""
@@ -142,28 +158,19 @@ class App(ctk.CTk):
                 tela.on_show()
 
     def _abrir_admin(self, tab=None):
-        """Abre a janela administrativa com feedback visual imediato (loading animado sem congelar a UI)."""
-        from ui.components.loading import LoadingOverlay
-        if not hasattr(self, "_admin_overlay") or not self._admin_overlay.winfo_exists():
-            self._admin_overlay = LoadingOverlay(self, text="Abrindo Ajustes & Configurações...")
-        self._admin_overlay.show("⚙ Abrindo Ajustes & Configurações...")
-        self.update_idletasks()
+        """Abre a janela administrativa instantaneamente (3ms se em cache, ou com tela de carregamento imediata)."""
+        if getattr(self, "_admin_window", None) is not None and self._admin_window.winfo_exists():
+            self._admin_window.mostrar(tab=tab)
+            return
 
-        # Agendamento desvinculado (after 50ms) para que o loop do GIF inicie imediatamente
-        self.after(50, lambda: self._executar_abertura_admin(tab))
-
-    def _executar_abertura_admin(self, tab=None):
-        def _ao_concluir_admin():
-            if hasattr(self, "_admin_overlay") and self._admin_overlay.winfo_exists():
-                self._admin_overlay.hide()
-
-        admin = ScreenAdmin(
+        # Se ainda não existe, cria com start_hidden=False (exibe tela de carregamento na hora)
+        self._admin_window = ScreenAdmin(
             self,
             on_refresh=self._recarregar_dados_sistema,
             initial_tab=tab,
-            on_ready=_ao_concluir_admin
+            start_hidden=False
         )
-        admin.focus()
+        self._admin_window.mostrar(tab=tab)
 
     def _abrir_balanco(self):
         """Abre a janela isolada de Balanço Geral / Relatórios Financeiros."""
@@ -194,19 +201,22 @@ class App(ctk.CTk):
 
     def _on_login_sucesso(self):
         """Callback acionado após login bem-sucedido."""
-        try:
-            from services.supabase_sync import sincronizar_tudo_com_supabase
-            sincronizar_tudo_com_supabase(timeout=6)
-        except Exception:
-            pass
-
         # Garante que todas as TopBars ocultem o botão de login imediatamente
         for tela in getattr(self, "_telas", {}).values():
             if hasattr(tela, "_topbar") and hasattr(tela._topbar, "atualizar_status_auth"):
                 tela._topbar.atualizar_status_auth(True)
 
-        if hasattr(self, "_telas") and "cart" in self._telas:
-            self._telas["cart"].recarregar()
+        # Sincronização em segundo plano não-bloqueante (zero congelamento de interface)
+        import threading
+        def _sync_worker():
+            try:
+                from services.supabase_sync import sincronizar_tudo_com_supabase
+                sincronizar_tudo_com_supabase(timeout=6)
+                self.after(0, self._recarregar_dados_sistema)
+            except Exception as e:
+                print(f"Aviso na sincronização em segundo plano: {e}")
+
+        threading.Thread(target=_sync_worker, daemon=True).start()
 
     def _on_login_offline(self):
         """Callback acionado quando o usuário opta por continuar offline."""
@@ -280,12 +290,7 @@ def main():
     def _iniciar_fluxo_autenticacao():
         splash.close()
         if auth_manager.is_authenticated():
-            # Já autenticado com sessão salva: sincroniza dados com a nuvem e abre direto
-            try:
-                from services.supabase_sync import sincronizar_tudo_com_supabase
-                sincronizar_tudo_com_supabase(timeout=6)
-            except Exception:
-                pass
+            # Já autenticado com sessão salva: abre IMEDIATAMENTE (0ms) e sincroniza em background
             app.mostrar_janela_principal()
             app._on_login_sucesso()
         else:

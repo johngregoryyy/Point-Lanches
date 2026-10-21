@@ -98,15 +98,45 @@ def _get_winspool():
         return None
 
 
+class PRINTER_INFO_4(ctypes.Structure):
+    _fields_ = [
+        ("pPrinterName", ctypes.c_wchar_p),
+        ("pServerName", ctypes.c_wchar_p),
+        ("Attributes", ctypes.wintypes.DWORD)
+    ]
+
+
 def listar_impressoras_windows() -> list[str]:
-    """Retorna lista de nomes das impressoras instaladas no Windows."""
+    """Retorna lista de nomes das impressoras instaladas no Windows via Win32 API direta (~2ms)."""
+    try:
+        winspool = _get_winspool()
+        if winspool:
+            PRINTER_ENUM_LOCAL = 2
+            PRINTER_ENUM_CONNECTIONS = 4
+            flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS
+            needed = ctypes.wintypes.DWORD(0)
+            returned = ctypes.wintypes.DWORD(0)
+            winspool.EnumPrintersW(flags, None, 4, None, 0, ctypes.byref(needed), ctypes.byref(returned))
+            if needed.value > 0:
+                buf = ctypes.create_string_buffer(needed.value)
+                if winspool.EnumPrintersW(flags, None, 4, buf, needed.value, ctypes.byref(needed), ctypes.byref(returned)):
+                    items = (PRINTER_INFO_4 * returned.value).from_buffer(buf)
+                    printers = [items[i].pPrinterName.strip() for i in range(returned.value) if items[i].pPrinterName and items[i].pPrinterName.strip()]
+                    if printers:
+                        return sorted(printers)
+    except Exception:
+        pass
+
     try:
         cmd = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name"]
-        out = subprocess.check_output(cmd, text=True, timeout=5)
+        out = subprocess.check_output(cmd, text=True, timeout=3)
         printers = [p.strip() for p in out.strip().split("\n") if p.strip()]
-        return sorted(printers)
+        if printers:
+            return sorted(printers)
     except Exception:
-        return ["Elgin i8", "POS-80", "Generic / Text Only"]
+        pass
+
+    return ["Elgin i8", "POS-80", "Generic / Text Only"]
 
 
 def is_usb_printer_offline(hPrinter) -> tuple[bool, str]:

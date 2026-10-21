@@ -127,6 +127,7 @@ class ScreenCart(ctk.CTkFrame):
                 w.destroy()
 
         cats = listar_categorias()
+        self._cat_bebida_map = {c["nome"].lower(): bool(c.get("eh_bebida", 0)) for c in cats}
 
         # ── Botão "Todos" primeiro ──
         btn_todos = ctk.CTkButton(
@@ -220,6 +221,7 @@ class ScreenCart(ctk.CTkFrame):
                     preco=prod["preco"],
                     descricao=prod.get("descricao", ""),
                     categoria=prod.get("categoria", ""),
+                    eh_bebida=bool(prod.get("eh_bebida", 0)),
                     on_click=self._abrir_modal_item
                 )
                 card.grid(row=current_row, column=col, padx=8, pady=8, sticky="nsew")
@@ -244,6 +246,7 @@ class ScreenCart(ctk.CTkFrame):
                 preco=prod["preco"],
                 descricao=prod.get("descricao", ""),
                 categoria=prod.get("categoria", ""),
+                eh_bebida=bool(prod.get("eh_bebida", 0)),
                 on_click=self._abrir_modal_item
             )
             card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
@@ -251,18 +254,26 @@ class ScreenCart(ctk.CTkFrame):
     # ── Modal de adição ───────────────────────────────────────────────────────
 
     def _abrir_modal_item(self, nome: str, preco: float,
-                          descricao: str, categoria: str):
+                          descricao: str, categoria: str, eh_bebida: bool = False):
         modal = ctk.CTkToplevel(self)
         modal.title(f"Adicionar: {nome}")
+
+        is_bebida = bool(eh_bebida) or getattr(self, "_cat_bebida_map", {}).get(categoria.lower(), False) or ("bebida" in categoria.lower())
 
         modal.update_idletasks()
         sw = modal.winfo_screenwidth()
         sh = modal.winfo_screenheight()
 
-        # Proporção adaptada para 1366x768 (altura máxima ~560px para não sobrepor a barra de tarefas)
-        mw = min(660, sw - 30)
-        mh = min(560, sh - 90)
-        modal.minsize(520, 460)
+        # Proporção adaptada: bebidas ficam com pop-up compacto e elegante
+        if is_bebida:
+            mw = min(540, sw - 30)
+            mh = min(360, sh - 90)
+            modal.minsize(440, 280)
+        else:
+            mw = min(660, sw - 30)
+            mh = min(560, sh - 90)
+            modal.minsize(520, 460)
+
         modal.resizable(True, True)
         modal.grab_set()
 
@@ -347,7 +358,8 @@ class ScreenCart(ctk.CTkFrame):
                 preco=preco + extra,
                 obs=obs_final,
                 categoria=categoria,
-                quantidade=qty_var.get()
+                quantidade=qty_var.get(),
+                eh_bebida=is_bebida
             )
             modal.destroy()
 
@@ -410,7 +422,7 @@ class ScreenCart(ctk.CTkFrame):
 
         # ── Observações rápidas (3 colunas) ──
         # Bebidas NÃO exibem observações pré-definidas de lanches (como "Sem Maionese")
-        if categoria.lower() != "bebidas":
+        if not is_bebida:
             obs_rapidas_db = listar_observacoes_padrao(apenas_ativas=True)
             if obs_rapidas_db:
                 ctk.CTkLabel(
@@ -443,15 +455,17 @@ class ScreenCart(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE
         ).pack(anchor="w", padx=14, pady=(8, 0))
 
+        ph_obs = "Ex: bem gelada, com copo e gelo..." if is_bebida else "Ex: bem passado, sem sal..."
         ctk.CTkEntry(
             scroll, textvariable=obs_livre_var,
-            placeholder_text="Ex: bem passado, sem sal...",
+            placeholder_text=ph_obs,
             height=36, font=ctk.CTkFont(size=13)
         ).pack(fill="x", padx=14, pady=(2, 10))
         obs_livre_var.trace_add("write", lambda *_: _atualizar_obs_field())
 
         # ── Adicionais em 3 colunas (aproveita melhor o espaço) ──
-        if categoria.lower() not in CATS_SEM_ADICIONAIS:
+        # Bebidas NÃO exibem adicionais
+        if not is_bebida and categoria.lower() not in CATS_SEM_ADICIONAIS:
             adicionais_db = listar_adicionais()
             if adicionais_db:
                 ctk.CTkLabel(
@@ -489,13 +503,15 @@ class ScreenCart(ctk.CTkFrame):
     # ── Carrinho ──────────────────────────────────────────────────────────────
 
     def _adicionar_ao_carrinho(self, nome: str, preco: float,
-                               obs: str, categoria: str, quantidade: int = 1):
+                               obs: str, categoria: str, quantidade: int = 1,
+                               eh_bebida: bool = False):
         item = {
             "nome":       nome,
             "preco_unit": preco,
             "quantidade": quantidade,
             "observacao": obs,
             "categoria":  categoria,
+            "eh_bebida":  bool(eh_bebida),
         }
         self._state.setdefault("carrinho", []).append(item)
         self._renderizar_carrinho()
@@ -530,8 +546,7 @@ class ScreenCart(ctk.CTkFrame):
         self._on_next()
 
     def on_show(self):
-        """Chamado quando a tela fica visível."""
+        """Chamado quando a tela fica visível (transição instantânea sem recriar widgets do catálogo)."""
         self._renderizar_carrinho()
-        self._carregar_categorias()
         if hasattr(self, "_topbar") and hasattr(self._topbar, "atualizar_status_auth"):
             self._topbar.atualizar_status_auth()

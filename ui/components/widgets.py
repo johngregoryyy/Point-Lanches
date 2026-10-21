@@ -63,11 +63,13 @@ class ProductCard(ctk.CTkButton):
 
     def __init__(self, master, nome: str, preco: float,
                  descricao: str = "", categoria: str = "",
+                 eh_bebida: bool = False,
                  on_click=None, **kwargs):
         self._nome      = nome
         self._preco     = preco
         self._desc      = descricao
         self._categoria = categoria
+        self._eh_bebida = bool(eh_bebida)
         self._bloqueado = False
 
         preco_fmt = f"R$ {preco:.2f}".replace(".", ",")
@@ -89,7 +91,12 @@ class ProductCard(ctk.CTkButton):
 
             try:
                 if on_click:
-                    on_click(nome, preco, descricao, categoria)
+                    import inspect
+                    sig = inspect.signature(on_click)
+                    if len(sig.parameters) >= 5:
+                        on_click(nome, preco, descricao, categoria, self._eh_bebida)
+                    else:
+                        on_click(nome, preco, descricao, categoria)
             finally:
                 self.after(200, self._desbloquear)
 

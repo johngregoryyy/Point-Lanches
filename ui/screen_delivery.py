@@ -361,8 +361,11 @@ class ScreenDelivery(ctk.CTkFrame):
             habilitar_feedback_clique(btn, cor_flash=COR_PRIMARIA_HVR, debounce_ms=100)
             self._rua_botoes.append((rua, btn))
 
-    def _carregar_ruas(self):
-        """Carrega ruas do SQLite local e indexa com algoritmo dinâmico de siglas."""
+    def _carregar_ruas(self, force=False):
+        """Carrega ruas do SQLite local e indexa com algoritmo dinâmico de siglas (em memória)."""
+        if self._ruas_todas and not force:
+            return
+
         try:
             ruas_db = listar_ruas(apenas_ativas=True)
             if ruas_db:
@@ -592,12 +595,12 @@ class ScreenDelivery(ctk.CTkFrame):
             chip.set_selected(False)
         if hasattr(self, "_hist_taxa_lbl"):
             self._hist_taxa_lbl.configure(text="")
-        self._carregar_ruas()
         self._renderizar_grid_ruas(self._ruas_todas[:30])
 
     def on_show(self):
         """Chamado quando a tela fica visível. Sincroniza campos com o estado atual."""
-        self._carregar_ruas()
+        if not self._ruas_todas:
+            self._carregar_ruas()
         # Se for um novo pedido (sem dados de cliente nem endereço no state), limpa a tela
         if not self._state.get("cliente_nome") and not self._state.get("rua"):
             self.limpar_campos()

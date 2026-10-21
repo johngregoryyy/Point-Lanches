@@ -7,6 +7,7 @@ from database.db import (
     adicionar_produto, atualizar_produto,
     remover_produto, adicionar_categoria,
     atualizar_categoria, contar_produtos_por_categoria, remover_categoria,
+    atualizar_categoria_eh_bebida,
     listar_adicionais, adicionar_adicional, atualizar_adicional, remover_adicional,
     listar_taxas, adicionar_taxa, atualizar_taxa, remover_taxa,
     get_config, set_config,
@@ -42,11 +43,16 @@ class ScreenAdmin(ctk.CTkToplevel):
     - Aba 5: Configuração da Impressora Elgin i8 (Rede TCP 9100 e Cabo USB)
     """
 
-    def __init__(self, parent, on_refresh=None, initial_tab=None, on_ready=None, **kwargs):
+    def __init__(self, parent, on_refresh=None, initial_tab=None, on_ready=None, start_hidden: bool = False, **kwargs):
         super().__init__(parent, **kwargs)
         self.title("⚙  Configurações & Painel Administrativo")
         self._on_refresh = on_refresh
         self._on_ready = on_ready
+        self._start_hidden = start_hidden
+        self._abas_carregadas: set[str] = set()
+        self._overlay = None
+
+        self.protocol("WM_DELETE_WINDOW", self.fechar)
 
         self.update_idletasks()
         sw = self.winfo_screenwidth()
@@ -57,7 +63,6 @@ class ScreenAdmin(ctk.CTkToplevel):
         mh = min(570, sh - 90)
         self.geometry(f"{mw}x{mh}")
         self.minsize(860, 480)
-        self.grab_set()
         self.resizable(True, True)
 
         ctk.set_appearance_mode("Dark")
@@ -74,6 +79,15 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._obs_selecionada = None
         self._loading_timers: list[str] = []
 
+        if start_hidden:
+            self.withdraw()
+        else:
+            # Feedback visual instantâneo (<30ms) se aberta a frio
+            from ui.components.loading import LoadingOverlay
+            self._overlay = LoadingOverlay(self, text="Carregando Ajustes...")
+            self._overlay.show()
+            self.update()
+
         self._build_ui()
         if initial_tab:
             try:
@@ -81,15 +95,82 @@ class ScreenAdmin(ctk.CTkToplevel):
             except Exception:
                 pass
 
-        # Se estiver autenticado no Supabase, puxa os dados mais recentes da nuvem
+        # Carrega os dados imediatamente do SQLite local
+        self._finalizar_carregamento_ajustes()
+
+        if not start_hidden:
+            self.lift()
+            self.focus_force()
+            try:
+                self.grab_set()
+            except Exception:
+                pass
+
+        # Sincronização em segundo plano não-bloqueante se autenticado
+        import threading
+        def _sync_bg():
+            try:
+                from services.supabase_sync import puxar_dados_do_supabase
+                if puxar_dados_do_supabase():
+                    self.after(0, lambda: self._finalizar_carregamento_ajustes(force_all=True))
+            except Exception:
+                pass
+        threading.Thread(target=_sync_bg, daemon=True).start()
+
+    def mostrar(self, tab=None):
+        """Torna a janela visível instantaneamente (3ms)."""
+        if tab:
+            try:
+                self._tabs.set(tab)
+            except Exception:
+                pass
+        self.deiconify()
+        self.lift()
+        self.focus_force()
         try:
-            from services.supabase_sync import puxar_dados_do_supabase
-            puxar_dados_do_supabase()
+            self.grab_set()
         except Exception:
             pass
+        self.after(20, self._ao_trocar_aba)
 
-        # Ativa o modal de loading com animação de ~8s ao abrir a aba de Ajustes
-        self._iniciar_carregamento_ajustes(duracao_ms=8000)
+    def fechar(self):
+        """Oculta a janela sem destruí-la para permitir reabertura instantânea."""
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.withdraw()
+
+    def _ao_trocar_aba(self):
+        """Carrega sob demanda o conteúdo da aba selecionada."""
+        aba_atual = self._tabs.get() if hasattr(self, "_tabs") else ""
+        if "Cardápio" in aba_atual:
+            if "cardapio" not in self._abas_carregadas:
+                self._carregar_produtos()
+                self._abas_carregadas.add("cardapio")
+        elif "Categorias" in aba_atual:
+            if "categorias" not in self._abas_carregadas:
+                if hasattr(self, "_carregar_categorias_tab"):
+                    self._carregar_categorias_tab()
+                self._abas_carregadas.add("categorias")
+        elif "Adicionais" in aba_atual:
+            if "adicionais" not in self._abas_carregadas:
+                self._carregar_adicionais()
+                self._abas_carregadas.add("adicionais")
+        elif "Taxas" in aba_atual:
+            if "taxas" not in self._abas_carregadas:
+                self._carregar_taxas()
+                self._abas_carregadas.add("taxas")
+        elif "Obs" in aba_atual:
+            if "obs" not in self._abas_carregadas:
+                if hasattr(self, "_carregar_obs"):
+                    self._carregar_obs()
+                self._abas_carregadas.add("obs")
+        elif "Impressora" in aba_atual:
+            if "impressora" not in self._abas_carregadas:
+                if hasattr(self, "_carregar_config"):
+                    self._carregar_config()
+                self._abas_carregadas.add("impressora")
 
     # ── Build Abas ────────────────────────────────────────────────────────────
 
@@ -125,7 +206,7 @@ class ScreenAdmin(ctk.CTkToplevel):
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#1E293B", hover_color="#334155",
             corner_radius=6,
-            command=lambda: self._iniciar_carregamento_ajustes(duracao_ms=8000)
+            command=self._finalizar_carregamento_ajustes
         )
         btn_recarregar.pack(side="right", padx=4)
         habilitar_feedback_clique(btn_recarregar, cor_flash="#334155")
@@ -191,76 +272,62 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._build_tab_observacoes(self._tabs.tab("📝  Obs. Rápidas"))
         self._build_tab_impressora(self._tabs.tab("🖨  Impressora"))
 
+        self._tabs.configure(command=self._ao_trocar_aba)
+
         # Overlay de carregamento para abertura e operações assíncronas
-        from ui.components.loading import LoadingOverlay
-        self._overlay = LoadingOverlay(self, text="Carregando Ajustes...")
+        if not hasattr(self, "_overlay") or self._overlay is None:
+            from ui.components.loading import LoadingOverlay
+            self._overlay = LoadingOverlay(self, text="Carregando Ajustes...")
 
-    def _iniciar_carregamento_ajustes(self, duracao_ms: int = 8000):
-        """
-        Exibe o modal/overlay com o GIF animado de loading por cerca de 8 segundos
-        enquanto realiza a leitura e validação das configurações de banco e porta do terminal,
-        garantindo uma transição visual fluida antes de renderizar os campos e opções.
-        """
-        if not hasattr(self, "_overlay"):
-            return
+    def _iniciar_carregamento_ajustes(self):
+        """Carrega e valida configurações de forma imediata."""
+        self._finalizar_carregamento_ajustes()
 
-        self._overlay.show("⚙ Carregando Ajustes & Configurações...")
-
-        # Cancelar timers pendentes anteriores
-        if hasattr(self, "_loading_timers"):
-            for tid in self._loading_timers:
-                try:
-                    self.after_cancel(tid)
-                except Exception:
-                    pass
-        self._loading_timers = []
-
-        etapas = [
-            (300,  "Conectando ao banco de dados SQLite (WAL)..."),
-            (1800, "Lendo parâmetros do terminal e dados locais..."),
-            (3600, "Validando tabelas de cardápio, adicionais e taxas..."),
-            (5400, "Verificando porta e comunicação da impressora Elgin i8..."),
-            (7200, "Consolidando dados do sistema e finalizando..."),
-            (duracao_ms, None)
-        ]
-
-        for delay, msg in etapas:
-            if msg is not None:
-                tid = self.after(delay, lambda m=msg: self._overlay.update_text(m) if hasattr(self, "_overlay") and self.winfo_exists() else None)
-                self._loading_timers.append(tid)
-            else:
-                tid = self.after(delay, self._finalizar_carregamento_ajustes)
-                self._loading_timers.append(tid)
-
-    def _finalizar_carregamento_ajustes(self):
-        """Oculta o overlay e recarrega os dados nos campos e tabelas de forma independente e segura."""
-        try:
-            from services.supabase_sync import puxar_dados_do_supabase
-            puxar_dados_do_supabase()
-        except Exception:
-            pass
-
-        if hasattr(self, "_overlay") and self.winfo_exists():
+    def _finalizar_carregamento_ajustes(self, force_all: bool = False):
+        """Oculta o overlay e recarrega os dados nos campos e tabelas de forma imediata e fluida."""
+        if hasattr(self, "_overlay") and self._overlay and self.winfo_exists():
             self._overlay.hide()
-            loaders = [
-                ("_carregar_produtos", self._carregar_produtos),
-                ("_carregar_categorias_tab", getattr(self, "_carregar_categorias_tab", None)),
-                ("_carregar_adicionais", self._carregar_adicionais),
-                ("_carregar_taxas", self._carregar_taxas),
-                ("_carregar_obs", getattr(self, "_carregar_obs", None)),
-                ("_carregar_config", getattr(self, "_carregar_config", None)),
-            ]
-            for nome, fn in loaders:
-                if fn and callable(fn):
-                    try:
-                        fn()
-                    except Exception as e:
-                        print(f"Erro ao carregar dados na rotina {nome}: {e}")
+
+        if force_all:
+            self._carregar_produtos()
+            if hasattr(self, "_carregar_categorias_tab"):
+                self._carregar_categorias_tab()
+            self._carregar_adicionais()
+            self._carregar_taxas()
+            if hasattr(self, "_carregar_obs"):
+                self._carregar_obs()
+            if hasattr(self, "_carregar_config"):
+                self._carregar_config()
+            self._abas_carregadas.update(["cardapio", "categorias", "adicionais", "taxas", "obs", "impressora"])
+        else:
+            self._ao_trocar_aba()
+            # Agenda carregamento silencioso das demais abas durante ociosidade
+            self.after(300, self._carregar_outras_abas_ocioso)
+
         if hasattr(self, "_on_ready") and callable(self._on_ready):
             try:
                 self._on_ready()
             except Exception:
                 pass
+
+    def _carregar_outras_abas_ocioso(self):
+        """Preenche silenciosamente as demais abas em background enquanto o usuário navega."""
+        if not self.winfo_exists():
+            return
+        loaders = [
+            ("categorias", getattr(self, "_carregar_categorias_tab", None)),
+            ("adicionais", getattr(self, "_carregar_adicionais", None)),
+            ("taxas", getattr(self, "_carregar_taxas", None)),
+            ("obs", getattr(self, "_carregar_obs", None)),
+            ("impressora", getattr(self, "_carregar_config", None)),
+        ]
+        for chave, fn in loaders:
+            if chave not in self._abas_carregadas and fn and callable(fn):
+                try:
+                    fn()
+                    self._abas_carregadas.add(chave)
+                except Exception:
+                    pass
 
     def destroy(self):
         """Garante cancelamento de todos os timers e limpeza segura do overlay."""
@@ -581,22 +648,25 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(tabela_frame, fg_color="#1E1E1E", height=36, corner_radius=0)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=0, minsize=65)
-        header.columnconfigure(1, weight=3, minsize=180)
-        header.columnconfigure(2, weight=1, minsize=140)
-        header.columnconfigure(3, weight=0, minsize=50)
+        header.columnconfigure(0, weight=0, minsize=55)
+        header.columnconfigure(1, weight=3, minsize=160)
+        header.columnconfigure(2, weight=0, minsize=120)
+        header.columnconfigure(3, weight=1, minsize=110)
+        header.columnconfigure(4, weight=0, minsize=50)
 
         ctk.CTkLabel(header, text="Ordem", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=0, padx=6, pady=6)
         ctk.CTkLabel(header, text="Nome da Categoria (clique para editar)", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=1, padx=6, pady=6, sticky="w")
-        ctk.CTkLabel(header, text="Produtos Vinculados", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=6, pady=6, sticky="w")
-        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=(4, 8), pady=6, sticky="e")
+        ctk.CTkLabel(header, text="Tipo / Bebida", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=2, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Produtos Vinculados", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=3, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(header, text="Ações", font=ctk.CTkFont(size=12, weight="bold"), text_color=COR_TEXTO_SUAVE).grid(row=0, column=4, padx=(4, 8), pady=6, sticky="e")
 
         self._cat_scroll = ctk.CTkScrollableFrame(tabela_frame, fg_color="transparent")
         self._cat_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-        self._cat_scroll.columnconfigure(0, weight=0, minsize=65)
-        self._cat_scroll.columnconfigure(1, weight=3, minsize=180)
-        self._cat_scroll.columnconfigure(2, weight=1, minsize=140)
-        self._cat_scroll.columnconfigure(3, weight=0, minsize=50)
+        self._cat_scroll.columnconfigure(0, weight=0, minsize=55)
+        self._cat_scroll.columnconfigure(1, weight=3, minsize=160)
+        self._cat_scroll.columnconfigure(2, weight=0, minsize=120)
+        self._cat_scroll.columnconfigure(3, weight=1, minsize=110)
+        self._cat_scroll.columnconfigure(4, weight=0, minsize=50)
 
         # Form lateral categorias (focado estritamente em novos cadastros)
         form_cat = ctk.CTkFrame(tab, fg_color=COR_CINZA_BARRA, corner_radius=10, width=320)
@@ -611,7 +681,17 @@ class ScreenAdmin(ctk.CTkToplevel):
 
         ctk.CTkLabel(form_cat, text="Ordem de Exibição", font=ctk.CTkFont(size=12), text_color=COR_TEXTO_SUAVE).pack(anchor="w", padx=14)
         self._cat_ordem = ctk.CTkEntry(form_cat, height=36, font=ctk.CTkFont(size=13), placeholder_text="0 (Prioridade na fila)")
-        self._cat_ordem.pack(fill="x", padx=14, pady=(2, 14))
+        self._cat_ordem.pack(fill="x", padx=14, pady=(2, 10))
+
+        self._cat_eh_bebida_var = ctk.BooleanVar(value=False)
+        self._cat_eh_bebida_switch = ctk.CTkSwitch(
+            form_cat,
+            text="É Categoria de Bebida?\n(oculta adicionais e obs. rápidas)",
+            variable=self._cat_eh_bebida_var,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            progress_color=COR_VERDE
+        )
+        self._cat_eh_bebida_switch.pack(anchor="w", padx=14, pady=(4, 14))
 
         btn_cadastrar_cat = ctk.CTkButton(
             form_cat, text="➕  Cadastrar Categoria", height=40,
@@ -637,12 +717,13 @@ class ScreenAdmin(ctk.CTkToplevel):
         # Dica explicativa
         ctk.CTkLabel(
             form_cat,
-            text="💡 Edição Rápida:\n"
-                 "    • Altere o Nome ou a Ordem direto na tabela (Enter salva)\n"
-                 "    • A ordem 0 aparece primeiro no cardápio\n"
-                 "    • Categorias com produtos possuem proteção contra exclusão.",
+            text="💡 Dica sobre Categorias:\n"
+                 "    • Chave 'Bebida' ligada: oculta adicionais e\n"
+                 "      observações rápidas no pop-up do item.\n"
+                 "    • Altere Nome, Ordem ou Tipo direto na tabela.\n"
+                 "    • A ordem 0 aparece primeiro no cardápio.",
             font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE, justify="left"
-        ).pack(anchor="w", padx=14, pady=(16, 0))
+        ).pack(anchor="w", padx=14, pady=(12, 0))
 
     def _carregar_categorias_tab(self):
         if not hasattr(self, "_cat_scroll") or not self._cat_scroll.winfo_exists():
@@ -655,10 +736,11 @@ class ScreenAdmin(ctk.CTkToplevel):
             bg = "#272727" if i % 2 == 0 else "#222222"
             row = ctk.CTkFrame(self._cat_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
-            row.columnconfigure(0, weight=0, minsize=65)
-            row.columnconfigure(1, weight=3, minsize=180)
-            row.columnconfigure(2, weight=1, minsize=140)
-            row.columnconfigure(3, weight=0, minsize=50)
+            row.columnconfigure(0, weight=0, minsize=55)
+            row.columnconfigure(1, weight=3, minsize=160)
+            row.columnconfigure(2, weight=0, minsize=120)
+            row.columnconfigure(3, weight=1, minsize=110)
+            row.columnconfigure(4, weight=0, minsize=50)
 
             # Célula 0: Ordem (editável inline)
             entry_ordem = ctk.CTkEntry(
@@ -720,15 +802,41 @@ class ScreenAdmin(ctk.CTkToplevel):
             entry_nome.bind("<Return>", _ao_mudar_nome_cat)
             entry_nome.bind("<FocusOut>", _ao_mudar_nome_cat)
 
-            # Célula 2: Produtos Vinculados
+            # Célula 2: Switch Tipo de Categoria (Bebida vs Comida)
+            var_bebida = ctk.BooleanVar(value=bool(cat.get("eh_bebida", 0)))
+            switch_bebida = ctk.CTkSwitch(
+                row,
+                text="🥤 Bebida" if var_bebida.get() else "🍔 Comida",
+                variable=var_bebida,
+                width=95, height=26,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                progress_color=COR_VERDE
+            )
+            def _ao_toggle_bebida(c=cat, v=var_bebida, sw=switch_bebida):
+                novo_val = 1 if v.get() else 0
+                sw.configure(text="🥤 Bebida" if novo_val else "🍔 Comida")
+                atualizar_categoria_eh_bebida(c["id"], novo_val)
+                c["eh_bebida"] = novo_val
+                if hasattr(self, "_carregar_produtos"):
+                    self._carregar_produtos()
+                if self._on_refresh:
+                    try:
+                        self._on_refresh()
+                    except Exception:
+                        pass
+
+            switch_bebida.configure(command=_ao_toggle_bebida)
+            switch_bebida.grid(row=0, column=2, padx=6, pady=4, sticky="w")
+
+            # Célula 3: Produtos Vinculados
             qtd_prods = contar_produtos_por_categoria(cat["id"])
             cor_qtd = COR_VERDE if qtd_prods > 0 else COR_TEXTO_SUAVE
-            txt_qtd = f"{qtd_prods} produto(s)" if qtd_prods > 0 else "Nenhum produto"
-            ctk.CTkLabel(row, text=txt_qtd, font=ctk.CTkFont(size=11), text_color=cor_qtd, anchor="w").grid(row=0, column=2, padx=6, sticky="w")
+            txt_qtd = f"{qtd_prods} produto(s)" if qtd_prods > 0 else "Nenhum"
+            ctk.CTkLabel(row, text=txt_qtd, font=ctk.CTkFont(size=11), text_color=cor_qtd, anchor="w").grid(row=0, column=3, padx=6, sticky="w")
 
-            # Célula 3: Ação única Excluir (🗑) com diálogo e validação relacional
+            # Célula 4: Ação única Excluir (🗑) com diálogo e validação relacional
             btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.grid(row=0, column=3, padx=(4, 8), sticky="e")
+            btn_frame.grid(row=0, column=4, padx=(4, 8), sticky="e")
             btn_del = ctk.CTkButton(
                 btn_frame, text="🗑", width=34, height=28,
                 font=ctk.CTkFont(size=13),
@@ -741,6 +849,7 @@ class ScreenAdmin(ctk.CTkToplevel):
     def _cadastrar_categoria(self):
         nome = self._cat_nome.get().strip()
         ordem_str = self._cat_ordem.get().strip()
+        eh_bebida = 1 if self._cat_eh_bebida_var.get() else 0
 
         if not nome:
             self._cat_status_lbl.configure(text="⚠ Nome da categoria é obrigatório!", text_color=COR_VERMELHO)
@@ -751,7 +860,7 @@ class ScreenAdmin(ctk.CTkToplevel):
         except ValueError:
             ordem = 0
 
-        adicionar_categoria(nome, ordem)
+        adicionar_categoria(nome, ordem, eh_bebida)
         self._limpar_form_categoria()
         self._carregar_categorias_tab()
         self._atualizar_combobox_categorias()
@@ -767,6 +876,8 @@ class ScreenAdmin(ctk.CTkToplevel):
     def _limpar_form_categoria(self):
         self._cat_nome.delete(0, "end")
         self._cat_ordem.delete(0, "end")
+        self._cat_eh_bebida_var.set(False)
+        self._cat_status_lbl.configure(text="")
         self._cat_status_lbl.configure(text="")
 
     def _atualizar_combobox_categorias(self):

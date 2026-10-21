@@ -101,7 +101,8 @@ OBS_PADRAO = [
 
 
 def _upsert_categoria(conn, nome) -> int:
-    conn.execute("INSERT OR IGNORE INTO categorias (nome) VALUES (?)", (nome,))
+    eh_bebida = 1 if "bebida" in nome.lower() else 0
+    conn.execute("INSERT OR IGNORE INTO categorias (nome, eh_bebida) VALUES (?, ?)", (nome, eh_bebida))
     return conn.execute("SELECT id FROM categorias WHERE nome=?", (nome,)).fetchone()[0]
 
 

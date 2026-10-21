@@ -3,7 +3,7 @@
 
 # --- Dados do Estabelecimento ---
 ESTABELECIMENTO = "POINT LANCHES"
-TELEFONES = "(51) 3564-1305 | (51) 99919-1721 | (51) 98034-8622"
+TELEFONES = "(51) 99919-1721 | (51) 98034-8622"
 CIDADE = "Dois Irmãos - RS"
 
 # --- Configurações de Auto-Update (GitHub Releases) ---
