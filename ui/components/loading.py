@@ -26,6 +26,10 @@ def get_asset_path(filename: str) -> str:
     return os.path.join(base, "assets", filename)
 
 
+# Cache global de frames pré-renderizados para evitar decodificação repetida
+_GIF_CACHE: dict[tuple, tuple[list, list]] = {}
+
+
 class AnimatedGif(ctk.CTkFrame):
     """
     Widget CustomTkinter que renderiza um GIF animado usando Pillow e CustomTkinter.
@@ -59,16 +63,31 @@ class AnimatedGif(ctk.CTkFrame):
             self.start()
 
     def _load_frames(self):
-        """Carrega e converte todos os frames do GIF para CTkImage."""
+        """Carrega e converte frames do GIF com cache em memória e amostragem inteligente."""
+        cache_key = (self._gif_path, self._size)
+        if cache_key in _GIF_CACHE:
+            cached_frames, cached_durs = _GIF_CACHE[cache_key]
+            self._frames = list(cached_frames)
+            self._durations = list(cached_durs)
+            if self._frames:
+                self._label.configure(image=self._frames[0])
+            return
+
         if not os.path.isfile(self._gif_path):
             return
 
         try:
             with Image.open(self._gif_path) as im:
-                for frame in ImageSequence.Iterator(im):
+                frames_raw = list(ImageSequence.Iterator(im))
+                total = len(frames_raw)
+                # Amostragem para manter ~30 frames fluidos sem travar a CPU
+                step = max(1, total // 35) if total > 35 else 1
+
+                for idx in range(0, total, step):
+                    frame = frames_raw[idx]
                     f_rgba = frame.convert("RGBA")
                     if self._size:
-                        f_rgba = f_rgba.resize(self._size, Image.Resampling.LANCZOS)
+                        f_rgba = f_rgba.resize(self._size, Image.Resampling.BILINEAR)
                     ctk_img = ctk.CTkImage(
                         light_image=f_rgba,
                         dark_image=f_rgba,
@@ -76,9 +95,11 @@ class AnimatedGif(ctk.CTkFrame):
                     )
                     self._frames.append(ctk_img)
                     dur = frame.info.get("duration", 50)
-                    self._durations.append(max(20, min(150, dur if dur else 50)))
+                    dur_total = dur * step if dur else 50 * step
+                    self._durations.append(max(30, min(200, dur_total)))
 
             if self._frames:
+                _GIF_CACHE[cache_key] = (list(self._frames), list(self._durations))
                 self._label.configure(image=self._frames[0])
         except Exception:
             pass

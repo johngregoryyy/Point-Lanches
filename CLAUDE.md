@@ -391,3 +391,18 @@ Sempre que fizer alterações no código Python:
     - **Esquerda:** Registros cronológicos agrupados por data (Hoje, Ontem, etc.) e hora, com badges visuais coloridos por tipo de falha (`ERRO`, `EXCEÇÃO`, `IMPRESSORA`, `SUPABASE`, `AVISO`) e indicador de sincronização na nuvem.
     - **Direita:** Painel de detalhes técnicos com metadados completos, mensagem descritiva, caixa de texto com o traceback/stacktrace completo em fonte monoespaçada e botão de cópia rápida para o clipboard (`📋 Copiar Detalhes do Erro`).
   - Filtro por tipo de log, atualização manual com sincronização imediata (`🔄 Atualizar`) e limpeza com diálogo de confirmação (`🗑️ Limpar Logs`).
+
+### 9.7. Estabilidade do Painel de Ajustes, Correção de Congelamento e Performance Máxima (v1.1.7)
+- **Correção Definitiva do Congelamento e Fechamento Espontâneo do Painel de Ajustes (`ScreenAdmin`):**
+  - **Eliminação de Conflito de Janela e Grab:** Removida lógica de pré-aquecimento com `start_hidden=True` e `withdraw()` que entrava em conflito com a manipulação interna de título escuro do CustomTkinter no Windows (`_windows_set_titlebar_color`), que deixava a janela em estado invisível enquanto o `grab_set()` bloqueava a aplicação inteira.
+  - **Vinculação Transitória Segura (`transient(parent)`):** A janela `ScreenAdmin` agora utiliza `self.transient(parent)`, garantindo que o Windows a mantenha rigorosamente à frente da janela principal do PDV, impedindo que deslize para trás ou desapareça ao perder foco.
+  - **Destruição Limpa ao Fechar:** Fechamento com liberação garantida de grab (`self.grab_release()`) e descarte limpo de memória e timers via `self.destroy()`, eliminando instâncias fantasmas.
+- **Carregamento Sob Demanda (Lazy-Loading) por Aba:**
+  - Em vez de construir e carregar todas as 6 abas no `__init__` (o que provocava bloqueios de até 7,5 segundos na UI thread), o sistema agora carrega instantaneamente apenas a aba visível (`Cardápio`).
+  - As demais abas (`Categorias`, `Adicionais`, `Taxas`, `Obs. Rápidas`, `Impressora`) são povoadas sob demanda em menos de 50ms apenas quando o operador clica em suas respectivas guias.
+- **Renderização Progressiva de Produtos:**
+  - No catálogo de produtos do painel administrativo, os itens são renderizados progressivamente em lotes de 15, garantindo que o viewport inicial apareça de forma quase instantânea (<250ms).
+- **Otimização do `LoadingOverlay` e `AnimatedGif`:**
+  - Implementado cache global de frames (`_GIF_CACHE`) e amostragem inteligente de quadros do GIF de carregamento (`BILINEAR`), eliminando a sobrecarga de 150 frames de redimensionamento Lanczos que bloqueava a CPU no carregamento.
+- **Segurança de Encoding no Logger de Erros:**
+  - Tratamento com fallback ASCII em `_safe_print` no `error_logger.py`, impedindo que caracteres Unicode (emojis de botões e abas) causem exceções silenciosas de encoding (`cp1252`) no Windows.

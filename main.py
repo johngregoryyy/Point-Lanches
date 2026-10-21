@@ -127,24 +127,9 @@ class App(ctk.CTk):
         # Iniciar no cardápio
         self._mostrar("cart")
 
-        # Pré-aquece a janela administrativa em background para abertura instantânea (0ms)
-        self.after(500, self._pre_aquecer_admin)
-
         # Checagem não-bloqueante de atualização via GitHub Releases (2s após carregar a UI)
         if CHECK_UPDATES_ON_STARTUP:
             self.after(2000, lambda: check_updates_background(self))
-
-    def _pre_aquecer_admin(self):
-        """Pré-aquece a janela administrativa em background para abertura instantânea (0ms)."""
-        if getattr(self, "_admin_window", None) is None or not self._admin_window.winfo_exists():
-            try:
-                self._admin_window = ScreenAdmin(
-                    self,
-                    on_refresh=self._recarregar_dados_sistema,
-                    start_hidden=True
-                )
-            except Exception as e:
-                print(f"Aviso pre-warm admin: {e}")
 
     def mostrar_janela_principal(self):
         """Torna a janela visível e aplica zoom em telas HD."""
@@ -164,19 +149,20 @@ class App(ctk.CTk):
                 tela.on_show()
 
     def _abrir_admin(self, tab=None):
-        """Abre a janela administrativa instantaneamente (3ms se em cache, ou com tela de carregamento imediata)."""
+        """Abre o painel de ajustes com foco na frente da aplicação e sem travamento."""
         if getattr(self, "_admin_window", None) is not None and self._admin_window.winfo_exists():
-            self._admin_window.mostrar(tab=tab)
+            self._admin_window.deiconify()
+            self._admin_window.lift()
+            self._admin_window.focus_force()
+            if tab:
+                self._admin_window.definir_aba(tab)
             return
 
-        # Se ainda não existe, cria com start_hidden=False (exibe tela de carregamento na hora)
         self._admin_window = ScreenAdmin(
             self,
             on_refresh=self._recarregar_dados_sistema,
-            initial_tab=tab,
-            start_hidden=False
+            initial_tab=tab
         )
-        self._admin_window.mostrar(tab=tab)
 
     def _abrir_balanco(self):
         """Abre a janela isolada de Balanço Geral / Relatórios Financeiros."""

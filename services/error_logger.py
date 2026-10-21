@@ -27,6 +27,20 @@ def log_exception(modulo: str, exc: BaseException, contexto: str = "", tipo: str
     return log_error(modulo=modulo, mensagem=msg, detalhes=tb, tipo=tipo)
 
 
+def _safe_print(prefix: str, msg: str, tb: str = ""):
+    """Imprime diagnósticos no console de forma segura contra falhas de encoding no Windows."""
+    try:
+        texto = f"\n[{prefix}] {msg}\n{tb}".strip()
+        print(texto)
+    except Exception:
+        try:
+            clean = f"\n[{prefix}] {msg}\n{tb}".encode("ascii", errors="replace").decode("ascii")
+            if sys.stderr:
+                sys.stderr.write(clean + "\n")
+        except Exception:
+            pass
+
+
 def setup_global_exception_handlers(tk_app=None):
     """
     Configura interceptadores globais de exceções não tratadas:
@@ -40,7 +54,7 @@ def setup_global_exception_handlers(tk_app=None):
             return
         tb = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
         msg = f"Exceção não tratada: {exc_type.__name__}: {str(exc_value)}"
-        print(f"\n[GLOBAL_EXCEPTHOOK] {msg}\n{tb}")
+        _safe_print("GLOBAL_EXCEPTHOOK", msg, tb)
         log_error(modulo="sistema", mensagem=msg, detalhes=tb, tipo="EXCEÇÃO")
 
     sys.excepthook = _sys_excepthook
@@ -52,7 +66,7 @@ def setup_global_exception_handlers(tk_app=None):
             tb = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
             thread_nome = args.thread.name if args.thread else "desconhecida"
             msg = f"Exceção na thread '{thread_nome}': {args.exc_type.__name__}: {str(args.exc_value)}"
-            print(f"\n[THREAD_EXCEPTHOOK] {msg}\n{tb}")
+            _safe_print("THREAD_EXCEPTHOOK", msg, tb)
             log_error(modulo="thread", mensagem=msg, detalhes=tb, tipo="EXCEÇÃO")
 
         threading.excepthook = _threading_excepthook
@@ -61,7 +75,7 @@ def setup_global_exception_handlers(tk_app=None):
         def _tk_callback_exception(exc_type, exc_value, exc_traceback):
             tb = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             msg = f"Exceção de UI Tkinter: {exc_type.__name__}: {str(exc_value)}"
-            print(f"\n[TK_CALLBACK_EXCEPTHOOK] {msg}\n{tb}")
+            _safe_print("TK_CALLBACK_EXCEPTHOOK", msg, tb)
             log_error(modulo="ui", mensagem=msg, detalhes=tb, tipo="EXCEÇÃO")
 
         tk_app.report_callback_exception = _tk_callback_exception

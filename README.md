@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Versão](https://img.shields.io/badge/Vers%C3%A3o-1.1.6-00C853?style=for-the-badge&logo=git)
+![Versão](https://img.shields.io/badge/Vers%C3%A3o-1.1.7-00C853?style=for-the-badge&logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![CustomTkinter](https://img.shields.io/badge/Interface-CustomTkinter-1f538d?style=for-the-badge)
 ![Supabase](https://img.shields.io/badge/Cloud-Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)
@@ -12,7 +12,7 @@
 **Sistema Comercial de Ponto de Venda (PDV) e Tele-Entrega de Alta Performance**  
 *Desenvolvido sob medida para operações rápidas de lanchonete, balcão e delivery.*
 
-[Novidades v1.1.6](https://github.com/johngregoryyy/Point-Lanches/releases/tag/v1.1.6) •
+[Novidades v1.1.7](https://github.com/johngregoryyy/Point-Lanches/releases/tag/v1.1.7) •
 [Instalação](#-instalação-e-execução) •
 [Recursos](#-principais-recursos) •
 [Arquitetura](#-arquitetura-e-tecnologias) •
@@ -86,7 +86,7 @@ Com interface gráfica moderna em modo escuro nativo (*CustomTkinter*), o sistem
 point_lanches/
 ├── main.py                  # Ponto de entrada, ciclo de vida e gerenciamento de telas
 ├── config.py                # Cores, layouts, regras de negócio e constantes de rede
-├── version.py               # Controle centralizado da versão (v1.1.6)
+├── version.py               # Controle centralizado da versão (v1.1.7)
 ├── point_lanches.db         # Banco de dados local SQLite (modo WAL de alto desempenho)
 │
 ├── database/                # Camada de Persistência Local
@@ -136,7 +136,7 @@ Para garantir que o software execute com máxima velocidade mesmo sob alta deman
 
 ### Opção 1: Executável Instalador (Recomendado para Produção)
 Baixe o instalador mais recente na página de [Releases](https://github.com/johngregoryyy/Point-Lanches/releases):
-1. Execute o arquivo `PointLanches-Setup-v1.1.6.exe`.
+1. Execute o arquivo `PointLanches-Setup-v1.1.7.exe`.
 2. Siga o assistente de instalação (cria atalho na Área de Trabalho e no Menu Iniciar).
 3. O sistema já vem pronto para uso, com auto-atualizador embutido.
 

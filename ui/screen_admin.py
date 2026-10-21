@@ -43,14 +43,19 @@ class ScreenAdmin(ctk.CTkToplevel):
     - Aba 5: Configuração da Impressora Elgin i8 (Rede TCP 9100 e Cabo USB)
     """
 
-    def __init__(self, parent, on_refresh=None, initial_tab=None, on_ready=None, start_hidden: bool = False, **kwargs):
+    def __init__(self, parent, on_refresh=None, initial_tab=None, on_ready=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.title("⚙  Configurações & Painel Administrativo")
         self._on_refresh = on_refresh
         self._on_ready = on_ready
-        self._start_hidden = start_hidden
         self._abas_carregadas: set[str] = set()
         self._overlay = None
+
+        # Fixa a janela como modal e sempre à frente do PDV (impossibilita que deslize para trás)
+        try:
+            self.transient(parent)
+        except Exception:
+            pass
 
         self.protocol("WM_DELETE_WINDOW", self.fechar)
 
@@ -65,8 +70,6 @@ class ScreenAdmin(ctk.CTkToplevel):
         self.minsize(860, 480)
         self.resizable(True, True)
 
-        ctk.set_appearance_mode("Dark")
-
         # Centralizar na tela
         px = max(10, (sw - mw) // 2)
         py = max(10, (sh - mh) // 2)
@@ -79,15 +82,6 @@ class ScreenAdmin(ctk.CTkToplevel):
         self._obs_selecionada = None
         self._loading_timers: list[str] = []
 
-        if start_hidden:
-            self.withdraw()
-        else:
-            # Feedback visual instantâneo (<30ms) se aberta a frio
-            from ui.components.loading import LoadingOverlay
-            self._overlay = LoadingOverlay(self, text="Carregando Ajustes...")
-            self._overlay.show()
-            self.update()
-
         self._build_ui()
         if initial_tab:
             try:
@@ -95,35 +89,35 @@ class ScreenAdmin(ctk.CTkToplevel):
             except Exception:
                 pass
 
-        # Carrega os dados imediatamente do SQLite local
-        self._finalizar_carregamento_ajustes()
+        # Carrega sob demanda apenas a aba ativa (zero congelamento)
+        self._ao_trocar_aba()
 
-        if not start_hidden:
-            self.lift()
-            self.focus_force()
+        self.lift()
+        self.focus_force()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+
+        if hasattr(self, "_on_ready") and callable(self._on_ready):
             try:
-                self.grab_set()
+                self._on_ready()
             except Exception:
                 pass
 
-        # Sincronização em segundo plano não-bloqueante se autenticado
-        import threading
-        def _sync_bg():
-            try:
-                from services.supabase_sync import puxar_dados_do_supabase
-                if puxar_dados_do_supabase():
-                    self.after(0, lambda: self._finalizar_carregamento_ajustes(force_all=True))
-            except Exception:
-                pass
-        threading.Thread(target=_sync_bg, daemon=True).start()
-
-    def mostrar(self, tab=None):
-        """Torna a janela visível instantaneamente (3ms)."""
-        if tab:
+    def definir_aba(self, tab=None):
+        """Alterna para a aba indicada e carrega seus dados sob demanda."""
+        if tab and hasattr(self, "_tabs"):
             try:
                 self._tabs.set(tab)
+                self._ao_trocar_aba()
             except Exception:
                 pass
+
+    def mostrar(self, tab=None):
+        """Torna a janela visível instantaneamente com foco."""
+        if tab:
+            self.definir_aba(tab)
         self.deiconify()
         self.lift()
         self.focus_force()
@@ -131,15 +125,14 @@ class ScreenAdmin(ctk.CTkToplevel):
             self.grab_set()
         except Exception:
             pass
-        self.after(20, self._ao_trocar_aba)
 
     def fechar(self):
-        """Oculta a janela sem destruí-la para permitir reabertura instantânea."""
+        """Fecha e destrói a janela liberando todos os recursos com segurança."""
         try:
             self.grab_release()
         except Exception:
             pass
-        self.withdraw()
+        self.destroy()
 
     def _ao_trocar_aba(self):
         """Carrega sob demanda o conteúdo da aba selecionada."""
@@ -280,29 +273,18 @@ class ScreenAdmin(ctk.CTkToplevel):
             self._overlay = LoadingOverlay(self, text="Carregando Ajustes...")
 
     def _iniciar_carregamento_ajustes(self):
-        """Carrega e valida configurações de forma imediata."""
+        """Carrega e valida configurações da aba ativa de forma imediata."""
         self._finalizar_carregamento_ajustes()
 
     def _finalizar_carregamento_ajustes(self, force_all: bool = False):
-        """Oculta o overlay e recarrega os dados nos campos e tabelas de forma imediata e fluida."""
+        """Oculta o overlay e recarrega os dados sob demanda de forma imediata e fluida."""
         if hasattr(self, "_overlay") and self._overlay and self.winfo_exists():
             self._overlay.hide()
 
         if force_all:
-            self._carregar_produtos()
-            if hasattr(self, "_carregar_categorias_tab"):
-                self._carregar_categorias_tab()
-            self._carregar_adicionais()
-            self._carregar_taxas()
-            if hasattr(self, "_carregar_obs"):
-                self._carregar_obs()
-            if hasattr(self, "_carregar_config"):
-                self._carregar_config()
-            self._abas_carregadas.update(["cardapio", "categorias", "adicionais", "taxas", "obs", "impressora"])
-        else:
-            self._ao_trocar_aba()
-            # Agenda carregamento silencioso das demais abas durante ociosidade
-            self.after(300, self._carregar_outras_abas_ocioso)
+            self._abas_carregadas.clear()
+
+        self._ao_trocar_aba()
 
         if hasattr(self, "_on_ready") and callable(self._on_ready):
             try:
@@ -310,27 +292,12 @@ class ScreenAdmin(ctk.CTkToplevel):
             except Exception:
                 pass
 
-    def _carregar_outras_abas_ocioso(self):
-        """Preenche silenciosamente as demais abas em background enquanto o usuário navega."""
-        if not self.winfo_exists():
-            return
-        loaders = [
-            ("categorias", getattr(self, "_carregar_categorias_tab", None)),
-            ("adicionais", getattr(self, "_carregar_adicionais", None)),
-            ("taxas", getattr(self, "_carregar_taxas", None)),
-            ("obs", getattr(self, "_carregar_obs", None)),
-            ("impressora", getattr(self, "_carregar_config", None)),
-        ]
-        for chave, fn in loaders:
-            if chave not in self._abas_carregadas and fn and callable(fn):
-                try:
-                    fn()
-                    self._abas_carregadas.add(chave)
-                except Exception:
-                    pass
-
     def destroy(self):
-        """Garante cancelamento de todos os timers e limpeza segura do overlay."""
+        """Garante liberação do grab, cancelamento de timers e destruição segura da janela."""
+        try:
+            self.grab_release()
+        except Exception:
+            pass
         if hasattr(self, "_loading_timers"):
             for tid in self._loading_timers:
                 try:
@@ -338,11 +305,12 @@ class ScreenAdmin(ctk.CTkToplevel):
                 except Exception:
                     pass
             self._loading_timers.clear()
-        if hasattr(self, "_overlay"):
+        if hasattr(self, "_overlay") and self._overlay:
             try:
                 self._overlay.destroy()
             except Exception:
                 pass
+            self._overlay = None
         if hasattr(self, "_on_ready") and callable(self._on_ready):
             try:
                 self._on_ready()
@@ -458,7 +426,7 @@ class ScreenAdmin(ctk.CTkToplevel):
             cat_nomes = ["Geral"]
         cat_map = {c["nome"]: c["id"] for c in categorias_db} if categorias_db else {}
 
-        for i, prod in enumerate(produtos):
+        def _criar_linha_produto(i, prod):
             bg = "#272727" if i % 2 == 0 else "#222222"
             row = ctk.CTkFrame(self._tabela_scroll, fg_color=bg, corner_radius=6, height=42)
             row.pack(fill="x", pady=2, padx=2)
@@ -573,6 +541,20 @@ class ScreenAdmin(ctk.CTkToplevel):
             )
             btn_del.pack(side="left")
             habilitar_feedback_clique(btn_del, cor_flash="#DC2626")
+
+        # Renderização progressiva em lotes de 15 para abertura fluida (<250ms)
+        def _render_lote(inicio=0):
+            if not self.winfo_exists() or not hasattr(self, "_tabela_scroll") or not self._tabela_scroll.winfo_exists():
+                return
+            fim = min(inicio + 15, len(produtos))
+            for i in range(inicio, fim):
+                _criar_linha_produto(i, produtos[i])
+            if fim < len(produtos):
+                tid = self.after(10, lambda: _render_lote(fim))
+                if hasattr(self, "_loading_timers"):
+                    self._loading_timers.append(tid)
+
+        _render_lote(0)
 
     def _cadastrar_produto(self):
         nome = self._f_nome.get().strip()
